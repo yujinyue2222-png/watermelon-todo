@@ -1,0 +1,98 @@
+name: 打包并发布西瓜todo
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  APP_NAME: 西瓜todo
+  SRC_DIR: .
+
+jobs:
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install PySide6 pyinstaller
+      - name: PyInstaller 打包 .app
+        working-directory: ${{ env.SRC_DIR }}
+        run: |
+          pyinstaller --noconfirm --windowed \
+            --name "$APP_NAME" \
+            --osx-bundle-identifier "com.watermelon.desktoptodo" \
+            todo_qt.py
+      - name: 压缩成 zip（保留 .app 结构）
+        working-directory: ${{ env.SRC_DIR }}/dist
+        run: ditto -c -k --keepParent "$APP_NAME.app" "$APP_NAME-mac.zip"
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: ${{ env.SRC_DIR }}/dist/${{ env.APP_NAME }}-mac.zip
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install PySide6 pyinstaller
+      - name: PyInstaller 打包 .exe（单文件、无黑框）
+        working-directory: ${{ env.SRC_DIR }}
+        run: >
+          pyinstaller --noconfirm --windowed --onefile
+          --name "$env:APP_NAME"
+          todo_qt.py
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: ${{ env.SRC_DIR }}/dist/${{ env.APP_NAME }}.exe
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-mac, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 下载 Mac 产物
+        uses: actions/download-artifact@v4
+        with:
+          name: mac
+          path: dist
+      - name: 下载 Windows 产物
+        uses: actions/download-artifact@v4
+        with:
+          name: windows
+          path: dist
+      - name: 创建下载页并挂上安装包
+        uses: softprops/action-gh-release@v2
+        with:
+          name: 西瓜todo ${{ github.ref_name }}
+          body: |
+            ## 西瓜todo ${{ github.ref_name }}
+
+            下载适合你系统的版本：
+
+            - Windows 用户：下载 西瓜todo.exe，双击即用
+            - Mac 用户：下载 西瓜todo-mac.zip，解压后把 西瓜todo.app 拖进 应用程序
+          files: |
+            dist/西瓜todo-mac.zip
+            dist/西瓜todo.exe

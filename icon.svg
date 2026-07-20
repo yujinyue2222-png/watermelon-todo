@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!-- 西瓜todo 应用图标 · 白底 + 半圆可爱小西瓜 -->
+  <defs>
+    <linearGradient id="flesh" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ff6b85"/>
+      <stop offset="1" stop-color="#f0374f"/>
+    </linearGradient>
+    <linearGradient id="rind" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4cd07a"/>
+      <stop offset="1" stop-color="#1e9e50"/>
+    </linearGradient>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#f0374f" flood-opacity="0.20"/>
+    </filter>
+  </defs>
+
+  <!-- 白色圆角底 -->
+  <rect x="0" y="0" width="512" height="512" rx="120" fill="#ffffff"/>
+
+  <!-- 半圆西瓜：平边在上、弧边朝下 -->
+  <g filter="url(#soft)">
+    <!-- 红色瓜瓤（最里层半圆） -->
+    <path d="M148 208 A108 108 0 0 0 364 208 Z" fill="url(#flesh)"/>
+    <!-- 白色瓜白圈 -->
+    <path d="M132 208 A124 124 0 0 0 380 208 L364 208 A108 108 0 0 1 148 208 Z" fill="#f4fff6"/>
+    <!-- 绿色瓜皮 -->
+    <path d="M112 208 A144 144 0 0 0 400 208 L380 208 A124 124 0 0 1 132 208 Z" fill="url(#rind)"/>
+  </g>
+
+  <!-- 瓜子 -->
+  <ellipse cx="200" cy="248" rx="8" ry="12" fill="#3a2418" transform="rotate(-18 200 248)"/>
+  <ellipse cx="256" cy="262" rx="8" ry="12" fill="#3a2418"/>
+  <ellipse cx="312" cy="248" rx="8" ry="12" fill="#3a2418" transform="rotate(18 312 248)"/>
+  <ellipse cx="228" cy="290" rx="8" ry="12" fill="#3a2418" transform="rotate(-8 228 290)"/>
+  <ellipse cx="284" cy="290" rx="8" ry="12" fill="#3a2418" transform="rotate(8 284 290)"/>
+
+  <!-- 可爱表情：眼睛 + 腮红 + 微笑 -->
+  <circle cx="224" cy="252" r="7" fill="#3a2418"/>
+  <circle cx="288" cy="252" r="7" fill="#3a2418"/>
+  <ellipse cx="196" cy="270" rx="11" ry="7" fill="#ff9fb0" opacity="0.7"/>
+  <ellipse cx="316" cy="270" rx="11" ry="7" fill="#ff9fb0" opacity="0.7"/>
+  <path d="M240 274 Q256 288 272 274" fill="none" stroke="#3a2418" stroke-width="6" stroke-linecap="round"/>
+</svg>

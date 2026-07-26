@@ -1,9 +1,7 @@
-name: 打包并发布西瓜todo
+name: 打包并发布西瓜todo（旧版·已停用）
 
+# 已由 build-release-v2.yml 取代。仅保留手动触发，避免与 v2 工作流重复发布。
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
 
 env:

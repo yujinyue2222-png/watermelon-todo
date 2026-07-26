@@ -1223,6 +1223,22 @@ class TodoWidget(QWidget):
         self.expanded_height = self.cfg.get("expanded_height", g[3])
         if not isinstance(self.expanded_height, int) or self.expanded_height < 420:
             self.expanded_height = 500
+        # 防越界：若上次保存的位置落在所有屏幕可见区域之外（例如拔掉副屏、
+        # 分辨率变化导致坐标为负或超出边界），窗口会“看不见”像是打不开。
+        # 这里把坐标夹回当前主屏可见范围内，保证窗口一定可见。
+        try:
+            from PySide6.QtWidgets import QApplication as _QApp
+            _scr = _QApp.primaryScreen()
+            _av = _scr.availableGeometry() if _scr else None
+            if _av is not None:
+                _w = min(max(g[2], 300), _av.width())
+                _h = min(max(self.expanded_height, 420), _av.height())
+                _x = min(max(g[0], _av.left()), _av.right() - _w)
+                _y = min(max(g[1], _av.top()), _av.bottom() - _h)
+                g = [_x, _y, _w, g[3]]
+                self.expanded_height = _h
+        except Exception:
+            pass
         self.cfg["geometry"] = [g[0], g[1], g[2], self.expanded_height]
         self.setGeometry(g[0], g[1], g[2], self.expanded_height)
         self.setMinimumWidth(300)

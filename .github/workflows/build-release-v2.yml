@@ -37,6 +37,9 @@ jobs:
       - name: 由 SVG 生成 ico 图标
         working-directory: ${{ env.SRC_DIR }}
         shell: bash
+        env:
+          PYTHONUTF8: '1'
+          PYTHONIOENCODING: 'utf-8'
         run: |
           python - <<'PY'
           from PySide6.QtCore import QRectF, QSize
@@ -47,7 +50,7 @@ jobs:
           import os
           app = QApplication([])
           r = QSvgRenderer(os.environ["SVG_FILE"])
-          assert r.isValid(), "无效的 SVG"
+          assert r.isValid(), "invalid SVG"
           size = QSize(1024, 1024)
           img = QImage(size, QImage.Format_ARGB32)
           img.fill(QColor(0, 0, 0, 0))
@@ -58,7 +61,7 @@ jobs:
           with Image.open("watermelon-1024.png") as im:
               im.convert("RGBA").save("watermelon.ico", format="ICO",
                   sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])
-          print("ico 生成完成")
+          print("ico done")
           PY
 
       - name: 读取版本号

@@ -118,6 +118,15 @@ jobs:
           Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加选项："
           [Run]
           Filename: "{app}\西瓜todo.exe"; Description: "启动 西瓜todo"; Flags: nowait postinstall skipifsilent
+          [Code]
+          procedure InitializeWizard();
+          begin
+            MsgBox('温馨提示：' + #13#10#13#10 +
+                   '首次运行时，如果 Windows 弹出蓝色的“Windows 已保护你的电脑 / SmartScreen”提示，' + #13#10 +
+                   '请点击“更多信息”，再点“仍要运行”即可正常安装使用。'+ #13#10#13#10 +
+                   '这是因为本软件未购买付费数字签名，属于正常现象，不影响使用，请放心安装。',
+                   mbInformation, MB_OK);
+          end;
           ISS
           # ChineseSimplified.isl 是官方语言包，可能缺失，缺失则去掉语言行以免编译失败
           if [ ! -f "/c/Program Files (x86)/Inno Setup 6/Languages/ChineseSimplified.isl" ]; then

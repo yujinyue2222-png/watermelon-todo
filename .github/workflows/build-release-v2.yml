@@ -107,6 +107,8 @@ jobs:
           Compression=lzma2
           SolidCompression=yes
           WizardStyle=modern
+          PrivilegesRequired=lowest
+          PrivilegesRequiredOverridesAllowed=dialog
           [Languages]
           Name: "chs"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
           [Files]

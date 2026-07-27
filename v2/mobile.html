@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#ff5a7a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="西瓜todo">
+<meta name="mobile-web-app-capable" content="yes">
+<title>🍉 西瓜todo</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="apple-touch-icon" sizes="180x180" href="icon.png">
+<link rel="icon" href="icon.png">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  :root{
+    --bg1:#fff0f3; --bg2:#ffe3ea; --card:#ffffff; --accent:#ff5a7a;
+    --accent2:#ff8fa3; --text:#333; --sub:#999; --done:#bbb; --green:#3ec98a;
+    --shadow:0 6px 20px rgba(255,90,122,.15);
+  }
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
+    background:linear-gradient(160deg,var(--bg1),var(--bg2));
+    color:var(--text); min-height:100vh;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  .wrap{ max-width:560px; margin:0 auto; padding:16px 14px 120px; }
+  header{ text-align:center; padding:10px 0 6px; }
+  header h1{ font-size:26px; color:var(--accent); }
+  .cheer{ font-size:14px; color:var(--sub); margin-top:6px; min-height:20px; }
+  .stat{
+    display:flex; gap:10px; margin:14px 0;
+  }
+  .stat .box{
+    flex:1; background:var(--card); border-radius:16px; padding:12px;
+    text-align:center; box-shadow:var(--shadow);
+  }
+  .stat .num{ font-size:22px; font-weight:700; color:var(--accent); }
+  .stat .lbl{ font-size:12px; color:var(--sub); margin-top:2px; }
+  .progress{
+    height:10px; background:#ffe0e6; border-radius:6px; overflow:hidden; margin:4px 0 18px;
+  }
+  .progress i{
+    display:block; height:100%; width:0;
+    background:linear-gradient(90deg,var(--accent),var(--accent2));
+    transition:width .4s ease;
+  }
+  ul{ list-style:none; }
+  .task{
+    background:var(--card); border-radius:16px; padding:14px;
+    margin-bottom:12px; box-shadow:var(--shadow);
+    animation:pop .25s ease;
+  }
+  @keyframes pop{ from{opacity:0;transform:translateY(8px);} to{opacity:1;transform:none;} }
+  .task.done .title{ text-decoration:line-through; color:var(--done); }
+  .trow{ display:flex; align-items:flex-start; gap:10px; }
+  .check{
+    width:26px; height:26px; border-radius:50%; border:2px solid var(--accent2);
+    flex-shrink:0; display:flex; align-items:center; justify-content:center;
+    font-size:15px; color:#fff; transition:.2s; margin-top:1px;
+  }
+  .task.done .check{ background:var(--green); border-color:var(--green); }
+  .tbody{ flex:1; min-width:0; }
+  .title{ font-size:16px; word-break:break-word; line-height:1.4; }
+  .meta{ font-size:12px; color:var(--sub); margin-top:5px; display:flex; gap:8px; flex-wrap:wrap; }
+  .due{ color:var(--accent); }
+  .due.over{ color:#e23; font-weight:600; }
+  .del{ color:#ccc; font-size:20px; padding:0 4px; flex-shrink:0; }
+  .empty{ text-align:center; color:var(--sub); padding:50px 0; font-size:15px; }
+  .empty .big{ font-size:44px; margin-bottom:10px; }
+  .addbar{
+    position:fixed; left:0; right:0; bottom:0;
+    padding:12px 14px calc(12px + env(safe-area-inset-bottom));
+    background:rgba(255,255,255,.92); backdrop-filter:blur(10px);
+    box-shadow:0 -4px 20px rgba(0,0,0,.06);
+  }
+  .addbar .inner{ max-width:560px; margin:0 auto; display:flex; gap:8px; }
+  #inp{
+    flex:1; border:none; background:#f4f4f7; border-radius:14px;
+    padding:13px 14px; font-size:16px; outline:none;
+  }
+  #dueinp{
+    width:0; opacity:0; position:absolute; pointer-events:none;
+  }
+  .btn{
+    border:none; border-radius:14px; color:#fff; font-size:16px;
+    padding:0 18px; background:var(--accent); font-weight:600;
+  }
+  .btn.ghost{ background:#f4f4f7; color:var(--accent); font-size:20px; padding:0 14px; }
+  .toast{
+    position:fixed; left:50%; top:22%; transform:translateX(-50%) scale(.9);
+    background:rgba(0,0,0,.8); color:#fff; padding:12px 20px; border-radius:14px;
+    font-size:15px; opacity:0; pointer-events:none; transition:.25s; z-index:99;
+  }
+  .toast.show{ opacity:1; transform:translateX(-50%) scale(1); }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>🍉 西瓜todo</h1>
+      <div class="cheer" id="cheer"></div>
+    </header>
+    <div class="stat">
+      <div class="box"><div class="num" id="s-total">0</div><div class="lbl">全部</div></div>
+      <div class="box"><div class="num" id="s-done">0</div><div class="lbl">已完成</div></div>
+      <div class="box"><div class="num" id="s-left">0</div><div class="lbl">待办</div></div>
+    </div>
+    <div class="progress"><i id="bar"></i></div>
+    <ul id="list"></ul>
+    <div class="empty" id="empty">
+      <div class="big">🍉</div>还没有待办，添加一个吧~
+    </div>
+  </div>
+
+  <div class="addbar">
+    <div class="inner">
+      <button class="btn ghost" id="datebtn" title="设置截止时间">📅</button>
+      <input id="inp" placeholder="添加一个待办..." maxlength="200">
+      <input id="dueinp" type="datetime-local">
+      <button class="btn" id="addbtn">添加</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  const KEY = "watermelon_todo_mobile_v1";
+  const CHEERS = [
+    "加油啦！✨","今天也要元气满满哦~ 🌸","一件一件来，你可以的！💪",
+    "慢慢来，会更快 🍀","完成的每一件都值得鼓励 🎉","别忘了对自己好一点 ☕",
+    "前进一小步也是胜利 🚀","你比想象中更棒 💖","把大事拆小，就不难啦 📌",
+    "深呼吸，开始行动吧 🌈","今天的努力都算数 ⭐","冲鸭，好运在路上 🍭"
+  ];
+  const $ = s => document.querySelector(s);
+  const listEl = $("#list"), emptyEl = $("#empty");
+  const inp = $("#inp"), dueInp = $("#dueinp");
+  let tasks = load();
+  let pendingDue = "";
+
+  function load(){
+    try{ return JSON.parse(localStorage.getItem(KEY)) || []; }
+    catch(e){ return []; }
+  }
+  function save(){ localStorage.setItem(KEY, JSON.stringify(tasks)); }
+
+  function toast(msg){
+    const t = $("#toast");
+    t.textContent = msg; t.classList.add("show");
+    clearTimeout(t._t);
+    t._t =setTimeout(()=>t.classList.remove("show"), 1400);
+  }
+  function cheer(){ $("#cheer").textContent = CHEERS[Math.floor(Math.random()*CHEERS.length)]; }
+
+  function fmtDue(ts){
+    if(!ts) return null;
+    const d = new Date(ts), now = new Date();
+    const over = d < now;
+    const pad = n => String(n).padStart(2,"0");
+    const sameDay = d.toDateString() === now.toDateString();
+    const label = sameDay
+      ? `今天 ${pad(d.getHours())}:${pad(d.getMinutes())}`
+      : `${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    return { label, over };
+  }
+
+  function render(){
+    listEl.innerHTML = "";
+    const total = tasks.length;
+    const done = tasks.filter(t=>t.done).length;
+    $("#s-total").textContent = total;
+    $("#s-done").textContent = done;
+    $("#s-left").textContent = total - done;
+    $("#bar").style.width = total ? (done/total*100)+"%" : "0";
+    emptyEl.style.display = total ? "none" : "block";
+
+    // 未完成在前，已完成在后
+    const sorted = [...tasks].sort((a,b)=> (a.done?1:0)-(b.done?1:0));
+    for(const t of sorted){
+      const li = document.createElement("li");
+      li.className = "task" + (t.done ? " done" : "");
+      const due = fmtDue(t.due);
+      li.innerHTML = `
+        <div class="trow">
+          <div class="check">${t.done ? "✓" : ""}</div>
+          <div class="tbody">
+            <div class="title"></div>
+            <div class="meta">
+              ${due ? `<span class="due ${due.over && !t.done ? "over":""}">⏰ ${due.label}${due.over && !t.done ? " 已超时":""}</span>` : ""}
+            </div>
+          </div>
+          <div class="del">✕</div>
+        </div>`;
+      li.querySelector(".title").textContent = t.text;
+      li.querySelector(".check").onclick = ()=>toggle(t.id);
+      li.querySelector(".title").onclick = ()=>toggle(t.id);
+      li.querySelector(".del").onclick = ()=>remove(t.id);
+      listEl.appendChild(li);
+    }
+  }
+
+  function add(){
+    const text = inp.value.trim();
+    if(!text){ inp.focus(); return; }
+    tasks.push({ id: Date.now()+""+Math.floor(Math.random()*1000), text, done:false, due: pendingDue || "" });
+    inp.value = ""; pendingDue = ""; dueInp.value = "";
+    $("#datebtn").textContent = "📅";
+    save(); render(); toast("已添加 🍉");
+  }
+  function toggle(id){
+    const t = tasks.find(x=>x.id===id);
+    if(!t) return;
+    t.done = !t.done;
+    save(); render();
+    if(t.done){ cheer(); toast("完成一件，真棒 🎉"); }
+  }
+  function remove(id){
+    tasks = tasks.filter(x=>x.id!==id);
+    save(); render();
+  }
+
+  $("#addbtn").onclick = add;
+  inp.addEventListener("keydown", e=>{ if(e.key==="Enter") add(); });
+  $("#datebtn").onclick = ()=>{ dueInp.showPicker ? dueInp.showPicker() : dueInp.click(); };
+  dueInp.addEventListener("change", ()=>{
+    pendingDue = dueInp.value ? new Date(dueInp.value).getTime() : "";
+    $("#datebtn").textContent = pendingDue ? "🕒" : "📅";
+  });
+
+  cheer();
+  render();
+
+  // PWA：注册 Service Worker（同目录 sw.js 可选，缺失不影响使用）
+  if("serviceWorker" in navigator){
+    navigator.serviceWorker.register("sw.js").catch(()=>{});
+  }
+})();
+</script>
+</body>
+</html>

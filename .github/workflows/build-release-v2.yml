@@ -133,13 +133,16 @@ jobs:
             sed -i '/\[Languages\]/d; /ChineseSimplified.isl/d' watermelon_todo.iss
           fi
           "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" watermelon_todo.iss
+          # 给便携版 exe 复制一个带「便携版」备注的名字，方便下载页区分
+          cp "dist/西瓜todo.exe" "dist/西瓜todo-${{ steps.ver.outputs.version }}-便携版.exe"
+          ls -la dist
 
       - name: 上传 Windows 产物
         uses: actions/upload-artifact@v4
         with:
           name: windows
           path: |
-            ${{ env.SRC_DIR }}/dist/西瓜todo.exe
+            ${{ env.SRC_DIR }}/dist/西瓜todo-*-便携版.exe
             ${{ env.SRC_DIR }}/dist/西瓜todo-*-Setup.exe
 
   # ========================= macOS：.app + DMG =========================
@@ -253,11 +256,21 @@ jobs:
 
             下载适合你系统的版本：
 
-            - Windows 安装版：`西瓜todo-*-Setup.exe`，双击安装，自动创建桌面快捷方式
-            - Windows 便携版：`西瓜todo.exe`，免安装，双击即用
+            - Windows 安装版：`西瓜todo-*-Setup.exe`，双击安装，自动创建桌面快捷方式（推荐普通用户）
+            - Windows 便携版：`西瓜todo-*-便携版.exe`，免安装，双击即用（适合放 U 盘或临时使用）
             - Mac 用户：下载 `西瓜todo-*-mac.dmg`，双击后把 西瓜todo 拖进「应用程序」
-              （首次打开若提示无法验证开发者，请在「系统设置 → 隐私与安全性」点“仍要打开”）
+
+            #### 首次打开的安全提示（正常现象，放心使用）
+            本软件未购买付费数字签名，首次打开时系统可能拦截，按下面操作即可：
+            - Windows：若弹出蓝色「Windows 已保护你的电脑 / SmartScreen」，点「更多信息」→「仍要运行」
+            - Mac：若提示「无法验证开发者」，到「系统设置 → 隐私与安全性」点「仍要打开」
+
+            #### 数据存在哪里
+            你的待办数据不会跟着程序走，统一保存在系统用户目录，卸载或移动程序都不会丢失：
+            - Windows：`%APPDATA%\DesktopTodo\`
+            - Mac：`~/Library/Application Support/DesktopTodo/`
+            > 安装版和便携版共用同一份数据，两个版本可随意切换使用。
           files: |
             dist/西瓜todo-*-Setup.exe
-            dist/西瓜todo.exe
+            dist/西瓜todo-*-便携版.exe
             dist/西瓜todo-*-mac.dmg

@@ -12,9 +12,13 @@
                       单文件 exe 分发、可配置全局快捷键
   v2.0  (2026-07-21) 重大更新：智能统计面板、批量操作模式、个性化鼓励系统、
                       流式布局标签、跨平台统一代码、打开数据文件夹功能
+  v2.3  (2026-07-27) 新增：启动自动检查更新，有新版本弹窗提示并可一键打开下载页
 """
 
-APP_VERSION = "2.0"
+APP_VERSION = "2.3"
+# 检查更新用：GitHub 仓库最新 Release 接口 + 下载页地址
+UPDATE_API = "https://api.github.com/repos/yujinyue2222-png/watermelon-todo/releases/latest"
+RELEASE_PAGE = "https://github.com/yujinyue2222-png/watermelon-todo/releases/latest"
 import ctypes
 import sys
 import os
@@ -40,11 +44,11 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import (
     Qt, QPoint, QTimer, QPropertyAnimation, QEasingCurve, QRect, QSize, Signal,
-    QAbstractNativeEventFilter, QDate,
+    QAbstractNativeEventFilter, QDate, QThread, QUrl,
 )
 from PySide6.QtGui import (
     QColor, QFont, QPainter, QPainterPath, QBrush, QCursor, QIcon, QFontDatabase,
-    QLinearGradient, QPaintEvent, QPen,
+    QLinearGradient, QPaintEvent, QPen, QDesktopServices,
 )
 
 # ----------------------------------------------------------------------------
@@ -3794,6 +3798,68 @@ def _register_global_hotkey(widget):
         return None
 
 
+# ----------------------------------------------------------------------------
+# 检查更新：后台线程请求 GitHub 最新 Release，比当前版本新则回主线程弹窗
+# ----------------------------------------------------------------------------
+def _parse_version(v):
+    # "v2.3" / "2.3.1" → (2, 3, 1) 便于比较；非数字段忽略
+    nums = []
+    for part in str(v).lstrip("vV").split("."):
+        try:
+            nums.append(int("".join(ch for ch in part if ch.isdigit())))
+        except ValueError:
+            nums.append(0)
+    return tuple(nums) if nums else (0,)
+
+
+class _UpdateChecker(QThread):
+    # 发现新版本时发射：(最新版本号, 更新说明)
+    found = Signal(str, str)
+
+    def run(self):
+        try:
+            import json as _json
+            from urllib.request import urlopen, Request
+            req = Request(UPDATE_API, headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "watermelon-todo-updater",
+            })
+            with urlopen(req, timeout=8) as resp:
+                data = _json.loads(resp.read().decode("utf-8"))
+            latest = str(data.get("tag_name") or "").strip()
+            body = str(data.get("body") or "").strip()
+            if latest and _parse_version(latest) > _parse_version(APP_VERSION):
+                self.found.emit(latest, body)
+        except Exception:
+            # 网络不通/超时/无发布等一律静默，不打扰用户
+            pass
+
+
+def _start_update_check(parent):
+    checker = _UpdateChecker(parent)
+
+    def _on_found(latest, body):
+        from PySide6.QtWidgets import QMessageBox
+        note = body[:300] + ("…" if len(body) > 300 else "") if body else ""
+        text = f"发现新版本 {latest}（当前 {APP_VERSION}）。\n\n是否前往下载页更新？"
+        if note:
+            text += f"\n\n更新说明：\n{note}"
+        box = QMessageBox(parent)
+        box.setWindowTitle("西瓜todo · 检查更新")
+        box.setIcon(QMessageBox.Information)
+        box.setText(text)
+        box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        box.button(QMessageBox.Yes).setText("去下载")
+        box.button(QMessageBox.No).setText("以后再说")
+        if box.exec() == QMessageBox.Yes:
+            QDesktopServices.openUrl(QUrl(RELEASE_PAGE))
+
+    checker.found.connect(_on_found)
+    checker.start()
+    # 挂到 parent 上防止被垃圾回收
+    parent._update_checker = checker
+
+
 def main():
     app = QApplication(sys.argv)
     logo_path = _resource_path("watermelon_logo.svg")
@@ -3834,6 +3900,8 @@ def main():
     w.show()
     # 注册全局快捷键：Windows 为 Ctrl+Alt+T，macOS 为 Command+Option+T
     w._hotkey_filter = _register_global_hotkey(w)
+    # 启动 3 秒后后台检查更新（不阻塞界面，网络异常静默）
+    QTimer.singleShot(3000, lambda: _start_update_check(w))
     sys.exit(app.exec())
 
 

@@ -70,12 +70,17 @@ jobs:
 
       - name: PyInstaller 打包单文件 exe（无黑框）
         working-directory: ${{ env.SRC_DIR }}
-        run: >
-          pyinstaller --noconfirm --clean --onefile --windowed
-          --name "$env:APP_NAME"
-          --icon "watermelon.ico"
-          --add-data "$env:SVG_FILE;."
-          "$env:PY_FILE"
+        shell: bash
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed \
+            --name "西瓜todo" \
+            --icon "watermelon.ico" \
+            --add-data "$SVG_FILE;." \
+            "$PY_FILE"
+          ls -la dist
+
+      - name: 安装 Inno Setup
+        run: choco install innosetup --no-progress -y
 
       - name: 用 Inno Setup 生成 Setup 安装程序
         working-directory: ${{ env.SRC_DIR }}

@@ -13,9 +13,10 @@
   v2.0  (2026-07-21) 重大更新：智能统计面板、批量操作模式、个性化鼓励系统、
                       流式布局标签、跨平台统一代码、打开数据文件夹功能
   v2.3  (2026-07-27) 新增：启动自动检查更新，有新版本弹窗提示并可一键打开下载页
+  v2.5  (2026-07-27) 优化：再次双击程序时自动把已运行窗口召回前台（不再静默无反应）
 """
 
-APP_VERSION = "2.3"
+APP_VERSION = "2.5"
 # 检查更新用：GitHub 仓库最新 Release 接口 + 下载页地址
 UPDATE_API = "https://api.github.com/repos/yujinyue2222-png/watermelon-todo/releases/latest"
 RELEASE_PAGE = "https://github.com/yujinyue2222-png/watermelon-todo/releases/latest"
@@ -3449,6 +3450,15 @@ class TodoWidget(QWidget):
             self.raise_()
             self.activateWindow()
 
+    def summon_to_front(self):
+        """把窗口召回到前台并置顶激活（用于再次双击程序时唤起已运行实例）。"""
+        if getattr(self, "collapsed", False):
+            self.collapsed = False
+            self._apply_collapsed()
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
     def _toggle_topmost(self):
         cur = self.cfg.get("topmost", False)
         self.cfg["topmost"] = not cur
@@ -3874,7 +3884,13 @@ def main():
     _probe = QLocalSocket()
     _probe.connectToServer(_SRV_NAME)
     if _probe.waitForConnected(300):
-        # 已有实例在运行，直接退出（快捷键 Ctrl+Alt+T 会召唤已运行的窗口）
+        # 已有实例在运行：发一条 "show" 通知老实例把窗口召回前台，然后自己退出
+        try:
+            _probe.write(b"show")
+            _probe.flush()
+            _probe.waitForBytesWritten(300)
+        except Exception:
+            pass
         _probe.abort()
         sys.exit(0)
     _probe.abort()
@@ -3898,6 +3914,25 @@ def main():
         pass
     w = TodoWidget()
     w.show()
+    # 当再次启动本程序时，新实例会连上来发 "show"，这里收到后把窗口召回前台
+    def _on_new_connection():
+        try:
+            sock = _single_server.nextPendingConnection()
+            if sock is None:
+                return
+            def _handle():
+                try:
+                    sock.readAll()
+                except Exception:
+                    pass
+                w.summon_to_front()
+                sock.disconnectFromServer()
+            sock.readyRead.connect(_handle)
+            # 兜底：即便没读到数据，短暂延时后也召回一次
+            QTimer.singleShot(200, w.summon_to_front)
+        except Exception:
+            pass
+    _single_server.newConnection.connect(_on_new_connection)
     # 注册全局快捷键：Windows 为 Ctrl+Alt+T，macOS 为 Command+Option+T
     w._hotkey_filter = _register_global_hotkey(w)
     # 启动 3 秒后后台检查更新（不阻塞界面，网络异常静默）

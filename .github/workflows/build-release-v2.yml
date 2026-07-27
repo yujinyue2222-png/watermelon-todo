@@ -42,6 +42,9 @@ jobs:
           PYTHONIOENCODING: 'utf-8'
         run: |
           python - <<'PY'
+          import sys, io
+          sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+          sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
           from PySide6.QtCore import QRectF, QSize
           from PySide6.QtGui import QColor, QImage, QPainter
           from PySide6.QtSvg import QSvgRenderer

@@ -277,11 +277,33 @@ CHEER_QUOTES = [
     "{name}，深呼吸，开始行动吧 🌈",
     "{name}，今天的努力都算数 ⭐",
     "{name}，冲鸭，好运在路上 🍭",
+    "{name}，你已经很努力了，别太苛责自己 🫶",
+    "{name}，做完一件就奖励自己一下吧 🍰",
+    "{name}，星光不问赶路人，加油 🌟",
+    "{name}，先完成，再完美 ✍️",
+    "{name}，休息也是效率的一部分 😴",
+    "{name}，你今天的样子超级可爱 🐻",
+    "{name}，再坚持一下下就好啦 🐣",
+    "{name}，把焦虑写进清单，它就变小了 📝",
+    "{name}，今天也是被期待的一天呀 🌤️",
+    "{name}，稳住，我们能赢 🎮",
+    "{name}，一步一步，风景都在路上 🚶",
+    "{name}，别急，好事正在发生 🌷",
+    "{name}，你值得所有的好运气 🍀",
+    "{name}，喝口水，继续发光吧 💡",
+    "{name}，完成度 > 完美度，先动起来 ⚡",
+    "{name}，今天的你也在悄悄变强 🌱",
+    "{name}，累了就抱抱西瓜再出发 🍉",
+    "{name}，把注意力放在下一小步就好 🎯",
+    "{name}，你的坚持终会开花 🌸",
 ]
 
 
 def random_cheer(name):
     return random.choice(CHEER_QUOTES).format(name=name)
+
+
+
 
 
 # ----------------------------------------------------------------------------
@@ -537,6 +559,7 @@ def load_config():
     default = {"theme": "极光白", "topmost": True,
                "geometry": [140, 120, 340, 500], "collapsed": False,
                "autostart": False, "categories": list(CATEGORIES),
+               "floating_ball": True,
                "hotkey": {"ctrl": True, "alt": True, "shift": False, "key": "T"}}
     if os.path.exists(CONFIG_FILE):
         try:
@@ -711,7 +734,7 @@ PRIORITY_COLORS = {
     "重要": "#F5A623", "普通": "#98A2B3",
 }
 PRIORITY_RANK = {"P0": 0, "P1": 1, "P2": 2, "重要": 3, "普通": 4}
-PRIORITY_ICON = {"P0": "🔥", "P1": "🔥", "P2": "🔥", "重要": "⭐", "普通": ""}
+PRIORITY_ICON = {"P0": "🔥", "P1": "", "P2": "", "重要": "⭐", "普通": ""}
 # 属于“紧急”类的优先级（用于统计与显示判断）
 URGENT_PRIORITIES = ("P0", "P1", "P2")
 # 旧数据迁移映射：老版本的“紧急” -> P1
@@ -948,8 +971,8 @@ class TaskCard(QFrame):
 
         top = QWidget()
         lay = QHBoxLayout(top)
-        lay.setContentsMargins(12, 10, 10, 10)
-        lay.setSpacing(9)
+        lay.setContentsMargins(7, 10, 10, 10)
+        lay.setSpacing(7)
 
         # 优先级左侧色条
         self.pbar = QFrame()
@@ -960,7 +983,7 @@ class TaskCard(QFrame):
         # 状态圆点按钮（选择模式下变为复选框）
         self.dot = QPushButton()
         self.dot.setObjectName("dot")
-        self.dot.setFixedSize(27, 27)
+        self.dot.setFixedSize(22, 22)
         self.dot.setCursor(Qt.PointingHandCursor)
         if self.select_mode:
             self.dot.setText("☑" if self.selected else "☐")
@@ -1040,7 +1063,7 @@ class TaskCard(QFrame):
         lay.addLayout(mid, 1)
 
         # 编辑按钮（悬浮显示，唯一保留在卡片上的按钮）
-        self.edit_btn = QPushButton("✎")
+        self.edit_btn = QPushButton("✏️")
         self.edit_btn.setObjectName("edit")
         self.edit_btn.setFixedSize(27, 27)
         self.edit_btn.setToolTip("编辑待办")
@@ -1132,14 +1155,15 @@ class TaskCard(QFrame):
                 border-radius: 1px;
             }}
             QLabel#prio {{
-                color: #FFFFFF; font-size: 11px; font-weight: bold;
-                background: {pc}; border-radius: 8px; padding: 3px 8px;
+                color: {'#FFFFFF' if not done else t['done']}; font-size: 11px; font-weight: bold;
+                background: {pc if not done else _qss_alpha(pc, 0x22)};
+                border-radius: 8px; padding: 3px 8px;
             }}
             QPushButton#dot {{
                 background: {_qss_alpha(t['accent'], 0x10)};
                 border: 1px solid {_qss_alpha(t['accent'], 0x30)};
-                border-radius: 13px; color: {t['accent']};
-                font-size: 17px; font-weight: bold;
+                border-radius: 11px; color: {t['accent']};
+                font-size: 14px; font-weight: bold;
             }}
             QPushButton#dot:hover {{
                 background: {_qss_alpha(t['accent'], 0x22)};
@@ -1162,13 +1186,13 @@ class TaskCard(QFrame):
                 padding: 1px 0;
             }}
             QLabel#cat {{
-                color: {c}; font-size: 11px; font-weight: bold;
-                background: {_qss_alpha(c, 0x18)};
-                border: 1px solid {_qss_alpha(c, 0x28)};
+                color: {c if not done else t['done']}; font-size: 11px; font-weight: bold;
+                background: {_qss_alpha(c, 0x18 if not done else 0x0C)};
+                border: 1px solid {_qss_alpha(c, 0x28 if not done else 0x14)};
                 border-radius: 8px; padding: 3px 8px;
             }}
             QLabel#due {{
-                color: {t['sub']}; font-size: 11px;
+                color: {t['sub'] if not done else t['done']}; font-size: 11px;
                 background: {t['panel']}; border: 1px solid {t['border']};
                 border-radius: 8px; padding: 3px 8px;
             }}
@@ -1178,9 +1202,9 @@ class TaskCard(QFrame):
                 border-radius: 8px; padding: 3px 8px;
             }}
             QLabel#recur {{
-                color: {t['accent']}; font-size: 11px; font-weight: bold;
-                background: {_qss_alpha(t['accent'], 0x14)};
-                border: 1px solid {_qss_alpha(t['accent'], 0x25)};
+                color: {t['accent'] if not done else t['done']}; font-size: 11px; font-weight: bold;
+                background: {_qss_alpha(t['accent'], 0x14 if not done else 0x0A)};
+                border: 1px solid {_qss_alpha(t['accent'], 0x25 if not done else 0x12)};
                 border-radius: 8px; padding: 3px 8px;
             }}
             QPushButton#del, QPushButton#edit {{
@@ -1392,6 +1416,15 @@ class FloatingBall(QWidget):
         if self._speed_tick >= 20 or not hasattr(self, "_speed"):
             self._speed_tick = 0
             self._speed = self._current_speed()
+        # 每约 2 秒（60 帧）把悬浮窗重新提到最顶层：Qt 的 WindowStaysOnTopHint
+        # 会被其它同样置顶的窗口（全屏程序、部分输入法/播放器）盖住，需周期性 raise
+        self._top_tick = getattr(self, "_top_tick", 0) + 1
+        if self._top_tick >= 60:
+            self._top_tick = 0
+            try:
+                self.raise_()
+            except Exception:
+                pass
         # 走路计时：速度越快，时间推进越快 → 步频/弹跳都更快
         self._t += 0.03 * self._speed
         # 随机眨眼：正在眨则递减，否则按概率触发一次眨眼
@@ -1632,9 +1665,10 @@ class TodoWidget(QWidget):
         self.timer.timeout.connect(self._check_reminders)
         self.timer.start(30000)
 
-        # 恢复桌面悬浮小西瓜状态
+        # 恢复桌面悬浮小西瓜状态（默认开启：首次打开即显示悬浮西瓜；
+        # 曾手动收起的用户会保存 False，仍尊重其选择）
         self.floating_ball = None
-        if self.cfg.get("floating_ball", False):
+        if self.cfg.get("floating_ball", True):
             self._show_floating_ball()
 
     # -- 圆角背景绘制 --
@@ -1904,35 +1938,35 @@ class TodoWidget(QWidget):
         self.btn_proj_manage.clicked.connect(self._manage_projects_dialog)
         row1.addWidget(self.btn_proj_manage)
         outer.addLayout(row1)
-        # 第二行：批量导入 + 导出（各占一半）
+        # 第二行：批量导入（宽）+ 导出 + 多选（等比更宽，配色区分）
         row2 = QHBoxLayout()
         row2.setContentsMargins(0, 0, 0, 0)
-        row2.setSpacing(6)
+        row2.setSpacing(8)
         self.btn_import = QPushButton("＋ 批量导入")
         self.btn_import.setObjectName("secondarybtn")
-        self.btn_import.setFixedHeight(34)
+        self.btn_import.setFixedHeight(36)
         self.btn_import.setCursor(Qt.PointingHandCursor)
         self.btn_import.clicked.connect(self._batch_import_dialog)
-        row2.addWidget(self.btn_import, 1)
-        self.btn_export = QPushButton("导出")
-        self.btn_export.setObjectName("secondarybtn")
-        self.btn_export.setFixedHeight(34)
+        row2.addWidget(self.btn_import, 3)
+        self.btn_export = QPushButton("⬇ 导出")
+        self.btn_export.setObjectName("exportbtn")
+        self.btn_export.setFixedHeight(36)
         self.btn_export.setCursor(Qt.PointingHandCursor)
         self.btn_export.clicked.connect(self._export_project)
-        row2.addWidget(self.btn_export)
+        row2.addWidget(self.btn_export, 2)
         self.btn_project_multi = QPushButton("多选")
         self.btn_project_multi.setObjectName("secondarybtn")
-        self.btn_project_multi.setFixedHeight(34)
+        self.btn_project_multi.setFixedHeight(36)
         self.btn_project_multi.setCursor(Qt.PointingHandCursor)
         self.btn_project_multi.clicked.connect(self._toggle_select_mode)
-        row2.addWidget(self.btn_project_multi)
+        row2.addWidget(self.btn_project_multi, 2)
         self.btn_project_sel_all = QPushButton("全选")
-        self.btn_project_sel_all.setObjectName("secondarybtn")
-        self.btn_project_sel_all.setFixedHeight(34)
+        self.btn_project_sel_all.setObjectName("selallbtn")
+        self.btn_project_sel_all.setFixedHeight(36)
         self.btn_project_sel_all.setCursor(Qt.PointingHandCursor)
         self.btn_project_sel_all.clicked.connect(self._batch_select_all)
         self.btn_project_sel_all.setVisible(False)
-        row2.addWidget(self.btn_project_sel_all)
+        row2.addWidget(self.btn_project_sel_all, 2)
         outer.addLayout(row2)
         self.project_bar = bar
         bar.setVisible(False)
@@ -2459,7 +2493,22 @@ class TodoWidget(QWidget):
     def _build_catbar(self):
         self.catbar_widget = QFrame()
         self.catbar_widget.setObjectName("catbar")
-        self.catbar = QHBoxLayout(self.catbar_widget)
+        # 外层：可滚动的标签区（左，占满剩余宽度）+ 固定按钮区（右）
+        outer = QHBoxLayout(self.catbar_widget)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(6)
+
+        # ---- 左：横向可滚动的分类标签 ----
+        self.cat_scroll = QScrollArea()
+        self.cat_scroll.setObjectName("catscroll")
+        self.cat_scroll.setWidgetResizable(True)
+        self.cat_scroll.setFrameShape(QFrame.NoFrame)
+        self.cat_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.cat_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.cat_scroll.setFixedHeight(38)
+        self.cat_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        chips_holder = QWidget()
+        self.catbar = QHBoxLayout(chips_holder)
         self.catbar.setContentsMargins(0, 0, 0, 0)
         self.catbar.setSpacing(6)
         self.cat_btns = {}
@@ -2480,22 +2529,40 @@ class TodoWidget(QWidget):
         self.btn_new_cat.clicked.connect(self._create_category_from_bar)
         self.catbar.addWidget(self.btn_new_cat)
         self.catbar.addStretch()
-        # 多选按钮放在标签类型行最右边
+        self.cat_scroll.setWidget(chips_holder)
+        # 鼠标滚轮上下 → 转成横向滚动，方便无横向滚轮的鼠标
+        self.cat_scroll.installEventFilter(self)
+        outer.addWidget(self.cat_scroll, 1)
+
+        # ---- 右：固定的多选 / 全选按钮 ----
         self.btn_multi = QPushButton("☑")
         self.btn_multi.setObjectName("chip")
         self.btn_multi.setCursor(Qt.PointingHandCursor)
         self.btn_multi.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.btn_multi.clicked.connect(self._toggle_select_mode)
-        self.catbar.addWidget(self.btn_multi)
-        # 全选按钮放在标签类型行最右边，仅多选模式下显示
+        outer.addWidget(self.btn_multi)
         self.btn_sel_all = QPushButton("全选")
         self.btn_sel_all.setObjectName("chip")
         self.btn_sel_all.setCursor(Qt.PointingHandCursor)
         self.btn_sel_all.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.btn_sel_all.clicked.connect(self._batch_select_all)
         self.btn_sel_all.setVisible(False)
-        self.catbar.addWidget(self.btn_sel_all)
+        outer.addWidget(self.btn_sel_all)
         return self.catbar_widget
+
+    def eventFilter(self, obj, event):
+        # 分类标签区：把竖直滚轮转成横向滚动，方便普通鼠标左右浏览标签
+        try:
+            from PySide6.QtCore import QEvent
+            if (obj is getattr(self, "cat_scroll", None)
+                    and event.type() == QEvent.Wheel):
+                bar = self.cat_scroll.horizontalScrollBar()
+                delta = event.angleDelta().y() or event.angleDelta().x()
+                bar.setValue(bar.value() - delta)
+                return True
+        except Exception:
+            pass
+        return super().eventFilter(obj, event)
 
     def _build_batch_bar(self):
         bar = QFrame()
@@ -2723,6 +2790,19 @@ class TodoWidget(QWidget):
                 color: {t['accent']}; border-color: {t['accent']};
                 background: {_qss_alpha(t['accent'], 0x10)};
             }}
+            QPushButton#exportbtn {{
+                background: #22B07D; border: none;
+                border-radius: 11px; color: #FFFFFF;
+                font-size: 12px; font-weight: 700;
+            }}
+            QPushButton#exportbtn:hover {{ background: #1C9A6C; }}
+            QPushButton#exportbtn:pressed {{ background: #178257; }}
+            QPushButton#selallbtn {{
+                background: {t['accent']}; border: none;
+                border-radius: 11px; color: #FFFFFF;
+                font-size: 12px; font-weight: 700;
+            }}
+            QPushButton#selallbtn:hover {{ background: {_qss_alpha(t['accent'], 0xDD)}; }}
             QPushButton#datebtn {{
                 background: {t['card']}; border: 1px solid {t['border']};
                 border-radius: 12px; color: {t['accent']}; font-size: 15px;
@@ -2750,6 +2830,11 @@ class TodoWidget(QWidget):
             }}
             QScrollArea#scroll {{ background: transparent; border: none; }}
             QScrollArea#scroll > QWidget > QWidget {{ background: transparent; }}
+            QScrollArea#catscroll {{ background: transparent; border: none; }}
+            QScrollArea#catscroll > QWidget > QWidget {{ background: transparent; }}
+            QScrollBar:horizontal {{ background: transparent; height: 5px; margin: 0 2px; }}
+            QScrollBar::handle:horizontal {{ background: {_qss_alpha(t['sub'], 0x50)}; border-radius: 2px; min-width: 24px; }}
+            QScrollBar::handle:horizontal:hover {{ background: {t['sub']}; }}
             QScrollBar:vertical {{ background: transparent; width: 6px; margin: 2px; }}
             QScrollBar::handle:vertical {{ background: {t['border']}; border-radius: 3px; min-height: 24px; }}
             QScrollBar::handle:vertical:hover {{ background: {t['sub']}; }}

@@ -14,9 +14,11 @@
                       流式布局标签、跨平台统一代码、打开数据文件夹功能
   v2.3  (2026-07-27) 新增：启动自动检查更新，有新版本弹窗提示并可一键打开下载页
   v2.5  (2026-07-27) 优化：再次双击程序时自动把已运行窗口召回前台（不再静默无反应）
+  v2.6  (2026-07-28) 优化：桌面悬浮小西瓜腿部黑色描边（白底可见、连接处自然）；
+                      置顶待办卡片外观与普通待办一致，仅保留右上角钉子标记
 """
 
-APP_VERSION = "2.5"
+APP_VERSION = "2.6"
 # 检查更新用：GitHub 仓库最新 Release 接口 + 下载页地址
 UPDATE_API = "https://api.github.com/repos/yujinyue2222-png/watermelon-todo/releases/latest"
 RELEASE_PAGE = "https://github.com/yujinyue2222-png/watermelon-todo/releases/latest"
@@ -41,7 +43,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QScrollArea, QFrame, QGraphicsDropShadowEffect,
     QComboBox as QtComboBox, QMenu, QSizePolicy, QGraphicsOpacityEffect,
     QLayout, QTextEdit, QFileDialog, QCalendarWidget, QStyle,
-    QStyleOptionComboBox,
+    QStyleOptionComboBox, QSystemTrayIcon,
 )
 from PySide6.QtCore import (
     Qt, QPoint, QTimer, QPropertyAnimation, QEasingCurve, QRect, QSize, Signal,
@@ -430,6 +432,22 @@ class Store:
 
     def delete(self, tid):
         self.tasks = [t for t in self.tasks if t["id"] != tid]
+        self.save()
+
+    def delete_project(self, project):
+        """删除整个项目：移除该项目下所有待办"""
+        if not project:
+            return
+        self.tasks = [t for t in self.tasks if t.get("project", "") != project]
+        self.save()
+
+    def rename_project(self, old, new):
+        """重命名项目：把该项目下所有待办的 project 字段改名"""
+        if not old or not new or old == new:
+            return
+        for t in self.tasks:
+            if t.get("project", "") == old:
+                t["project"] = new
         self.save()
 
     def toggle(self, tid):
@@ -906,6 +924,7 @@ class TaskCard(QFrame):
     edited = Signal(str)
     sub_toggled = Signal(str, int)   # (任务id, 子任务索引)
     select_toggled = Signal(str, bool)   # (任务id, 是否选中)
+    pinned = Signal(str)   # (任务id) 切换置顶
     def __init__(self, task, theme, parent=None, select_mode=False, selected=False):
         super().__init__(parent)
         self.task = task
@@ -920,6 +939,7 @@ class TaskCard(QFrame):
         self._apply_style()
 
     def _build(self):
+        self.is_pinned = bool(self.task.get("pinned", False))
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
@@ -1017,7 +1037,7 @@ class TaskCard(QFrame):
         mid.addLayout(meta)
         lay.addLayout(mid, 1)
 
-        # 编辑按钮（悬浮显示）
+        # 编辑按钮（悬浮显示，唯一保留在卡片上的按钮）
         self.edit_btn = QPushButton("✎")
         self.edit_btn.setObjectName("edit")
         self.edit_btn.setFixedSize(27, 27)
@@ -1026,16 +1046,6 @@ class TaskCard(QFrame):
         self.edit_btn.clicked.connect(lambda: self.edited.emit(self.task["id"]))
         self.edit_btn.setVisible(False)
         lay.addWidget(self.edit_btn, 0, Qt.AlignVCenter)
-
-        # 删除按钮（悬浮显示）
-        self.del_btn = QPushButton("✕")
-        self.del_btn.setObjectName("del")
-        self.del_btn.setFixedSize(27, 27)
-        self.del_btn.setToolTip("删除待办")
-        self.del_btn.setCursor(Qt.PointingHandCursor)
-        self.del_btn.clicked.connect(lambda: self.deleted.emit(self.task["id"]))
-        self.del_btn.setVisible(False)
-        lay.addWidget(self.del_btn, 0, Qt.AlignVCenter)
 
         outer.addWidget(top)
 
@@ -1055,6 +1065,27 @@ class TaskCard(QFrame):
             self.sub_checks.append(cb)
         self.sub_panel.setVisible(False)
         outer.addWidget(self.sub_panel)
+
+        # 置顶钉子：浮在卡片右上角（绝对定位，不进布局、不占标题位置）
+        self.pin_mark = QLabel("📌", self)
+        self.pin_mark.setObjectName("pinmark")
+        self.pin_mark.adjustSize()
+        self.pin_mark.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.pin_mark.setVisible(self.is_pinned)
+        self._place_pin_mark()
+
+    def _place_pin_mark(self):
+        """把置顶钉子固定在卡片右上角"""
+        if not hasattr(self, "pin_mark"):
+            return
+        self.pin_mark.adjustSize()
+        w = self.pin_mark.width()
+        self.pin_mark.move(self.width() - w - 3, 2)
+        self.pin_mark.raise_()
+
+    def resizeEvent(self, e):
+        self._place_pin_mark()
+        super().resizeEvent(e)
 
     def _toggle_subs(self):
         self.sub_panel.setVisible(not self.sub_panel.isVisible())
@@ -1080,11 +1111,19 @@ class TaskCard(QFrame):
         title_color = t["done"] if done else t["text"]
         deco = "line-through" if done else "none"
         card_bg = t["card_hover"] if self._hover else t["card"]
+        # 已置顶：仅靠右上角钉子标记，卡片外观与普通待办完全一致（无边框高亮、无底色微染）
+        pinned = getattr(self, "is_pinned", False)
+        if hasattr(self, "pin_mark"):
+            self.pin_mark.setVisible(pinned)
+            self._place_pin_mark()
+        card_border = f"1px solid {t['border']}"
+        card_left = f"1px solid {t['border']}"
         self.setStyleSheet(f"""
             QFrame#card {{
                 background: {card_bg};
                 border-radius: 12px;
-                border: 1px solid {t['border']};
+                border: {card_border};
+                border-left: {card_left};
             }}
             QFrame#pbar {{
                 background: {'transparent' if (done or pr == '普通') else pc};
@@ -1106,6 +1145,11 @@ class TaskCard(QFrame):
             }}
             QPushButton#dot:pressed {{
                 background: {_qss_alpha(t['accent'], 0x35)};
+            }}
+            QLabel#pinmark {{
+                font-size: 10px;
+                background: transparent;
+                padding: 0px;
             }}
             QLabel#title {{
                 color: {title_color}; font-size: 14px; font-weight: 500;
@@ -1172,21 +1216,322 @@ class TaskCard(QFrame):
 
     def enterEvent(self, e):
         self._hover = True
-        self.del_btn.setVisible(True)
         self.edit_btn.setVisible(True)
         self._apply_style()
         super().enterEvent(e)
 
     def leaveEvent(self, e):
         self._hover = False
-        self.del_btn.setVisible(False)
         self.edit_btn.setVisible(False)
         self._apply_style()
         super().leaveEvent(e)
 
+    def contextMenuEvent(self, e):
+        """右键卡片弹出菜单：置顶/取消置顶、删除"""
+        if self.select_mode:
+            return
+        menu = QMenu(self)
+        t = self.theme
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background: {t['card']}; border: 1px solid {t['border']};
+                border-radius: 10px; padding: 6px;
+            }}
+            QMenu::item {{
+                color: {t['text']}; font-size: 13px;
+                padding: 7px 22px 7px 14px; border-radius: 7px;
+            }}
+            QMenu::item:selected {{
+                background: {_qss_alpha(t['accent'], 0x22)}; color: {t['accent']};
+            }}
+            QMenu::separator {{ height: 1px; background: {t['border']}; margin: 5px 8px; }}
+        """)
+        if self.is_pinned:
+            act_pin = menu.addAction("📌  取消置顶")
+        else:
+            act_pin = menu.addAction("📌  置顶")
+        menu.addSeparator()
+        act_del = menu.addAction("🗑  删除待办")
+        chosen = menu.exec(e.globalPos())
+        if chosen == act_pin:
+            self.pinned.emit(self.task["id"])
+        elif chosen == act_del:
+            self.deleted.emit(self.task["id"])
+
     def mouseDoubleClickEvent(self, e):
         self.edited.emit(self.task["id"])
         super().mouseDoubleClickEvent(e)
+
+
+# ----------------------------------------------------------------------------
+# 桌面悬浮小西瓜
+# ----------------------------------------------------------------------------
+class FloatingBall(QWidget):
+    """桌面悬浮小西瓜：无边框、置顶、小圆形，可拖动。
+    左键单击（非拖动）→ 唤起主界面；右键 → 菜单（退出）。"""
+
+    SIZE = 56  # 西瓜本体直径
+    PAD_X = 14  # 左右留白（给手臂+摆动）
+    PAD_TOP = 6  # 顶部留白（给弹跳）
+    PAD_BOTTOM = 20  # 底部留白（给腿+脚）
+
+    def __init__(self, main_window):
+        super().__init__(None)
+        self.main = main_window
+        self._drag_pos = None
+        self._moved = False
+        # 控件比西瓜本体大一圈，容纳摆动/弹跳/腿的空间
+        self.W = self.SIZE + self.PAD_X * 2
+        self.H = self.SIZE + self.PAD_TOP + self.PAD_BOTTOM
+        self.setWindowFlags(
+            Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setFixedSize(self.W, self.H)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("西瓜todo · 点击打开 / 右键退出")
+        # ---- 动画状态 ----
+        self._t = 0.0          # 累计时间（秒）
+        self._blinking = 0.0     # 眨眼进度（>0 表示正在眨）
+        import random as _rnd
+        self._rnd = _rnd
+        from PySide6.QtCore import QTimer
+        self._anim = QTimer(self)
+        self._anim.setInterval(30)  # ~33fps
+        self._anim.timeout.connect(self._on_anim_tick)
+        self._anim.start()
+        # 载入西瓜图标（透明背景、只有西瓜本体的 SVG），高清渲染；失败回退 emoji
+        self._pixmap = None
+        self._pixmap_blink = None   # 闭眼版（眨眼时整脸切换，颜色纹路与原图一致）
+        try:
+            # 优先用精简版（无方形底/无阴影），找不到再退回原 logo
+            ball_path = _resource_path("watermelon_ball.svg")
+            svg_path = ball_path if ball_path.exists() else _resource_path("watermelon_logo.svg")
+            if svg_path.exists():
+                from PySide6.QtSvg import QSvgRenderer
+                from PySide6.QtCore import QByteArray
+                dpr = self.devicePixelRatioF() if hasattr(self, "devicePixelRatioF") else 1.0
+                px = int(self.SIZE * dpr)
+                from PySide6.QtGui import QPainter as _QP, QPixmap
+
+                def _render(renderer):
+                    pm = QPixmap(px, px)
+                    pm.fill(Qt.transparent)
+                    _pp = _QP(pm)
+                    _pp.setRenderHint(_QP.Antialiasing, True)
+                    renderer.render(_pp)
+                    _pp.end()
+                    pm.setDevicePixelRatio(dpr)
+                    return pm if not pm.isNull() else None
+
+                #睁眼版（原图）
+                self._pixmap = _render(QSvgRenderer(str(svg_path)))
+
+                # 闭眼版：读 SVG 文本，把左眼那组椭圆替换成一条闭眼弧线
+                try:
+                    svg_txt = svg_path.read_text(encoding="utf-8")
+                    open_eye = (
+                        '  <ellipse cx="384" cy="494" rx="73" ry="82" fill="#FFFFFF"\r\n'
+                        '           stroke="#F6E7E4" stroke-width="10"/>\r\n'
+                        '  <ellipse cx="397" cy="506" rx="43" ry="52" fill="#261D20"/>\r\n'
+                        '  <ellipse cx="380" cy="486" rx="16" ry="20" fill="#FFFFFF"/>\r\n'
+                        '  <circle cx="413" cy="528" r="8" fill="#FFFFFF" opacity="0.72"/>'
+                    )
+                    # 与右眼(M579 506 Q632 461 685 506)对称的左眼闭眼弧线
+                    closed_eye = (
+                        '  <path d="M339 506 Q392 461 445 506" fill="none"\r\n'
+                        '        stroke="#211A1C" stroke-width="19" stroke-linecap="round"/>'
+                    )
+                    if open_eye in svg_txt:
+                        blink_txt = svg_txt.replace(open_eye, closed_eye)
+                    else:
+                        # 换行符可能被规范化，用宽松替换：删掉四个眼睛椭圆块
+                        import re as _re
+                        blink_txt = _re.sub(
+                            r'<ellipse cx="384".*?<circle cx="413"[^/]*/>',
+                            closed_eye.strip(),
+                            svg_txt, count=1, flags=_re.S)
+                    r2 = QSvgRenderer(QByteArray(blink_txt.encode("utf-8")))
+                    self._pixmap_blink = _render(r2)
+                except Exception:
+                    self._pixmap_blink = None
+        except Exception:
+            self._pixmap = None
+        # 初始位置：屏幕右下角上方一点
+        try:
+            scr = QApplication.primaryScreen().availableGeometry()
+            pos = self.main.cfg.get("floating_ball_pos")
+            if (isinstance(pos, list) and len(pos) == 2
+                    and all(isinstance(v, int) for v in pos)):
+                x = min(max(pos[0], scr.left()), scr.right() - self.W)
+                y = min(max(pos[1], scr.top()), scr.bottom() - self.H)
+            else:
+                x = scr.right() - self.W - 24
+                y = scr.bottom() - self.H - 120
+            self.move(x, y)
+        except Exception:
+            self.move(1000, 600)
+
+    def _on_anim_tick(self):
+        # 窗口不可见时不重绘，省 CPU（被完全遮挡/隐藏时避免空转 33fps）
+        if not self.isVisible():
+            return
+        # 走路计时
+        self._t += 0.03
+        # 随机眨眼：正在眨则递减，否则按概率触发一次眨眼
+        if self._blinking > 0:
+            self._blinking -= 0.08
+            if self._blinking < 0:
+                self._blinking = 0.0
+        else:
+            if self._rnd.random() < 0.012:
+                self._blinking = 1.0
+        self.update()
+
+    def paintEvent(self, e):
+        import math
+        from PySide6.QtGui import (QPainter, QColor, QFont, QPen, QBrush,
+                                   QPainterPath)
+        from PySide6.QtCore import QPointF, QRectF
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setRenderHint(QPainter.SmoothPixmapTransform, True)
+
+        s = self.SIZE
+        cx = self.W / 2.0                       # 控件水平中心
+        body_x = self.PAD_X
+        body_y = self.PAD_TOP
+        body_bottom = body_y + s                # 西瓜本体底边
+
+        # 走路相位
+        walk = math.sin(self._t * 5.0)          # -1..1
+        swing = walk * 5.0                       # 身体左右摆动角度（度）
+        bob = abs(math.sin(self._t * 5.0)) * 2.0  # 上下弹跳（像走路一样一颠一颠）
+
+        # ===== 依据 watermelon_ball.svg 真实几何（viewBox 1024，三角形西瓜）=====
+        # 顶点(512,100)；底边圆弧 Q512 888 813 827，最低点在正中央(512,888)；
+        # 左斜边 (443,152)->(135,679)，右斜边 (581,152)->(889,679)。
+        def sx(u):  # SVG x(1024) -> 本体局部
+            return body_x + s * (u / 1024.0)
+        def sy(v):  # SVG y(1024) -> 本体局部
+            return body_y + s * (v / 1024.0)
+        cx_body = sx(512.0)
+        melon_bottom = sy(878.0)   # 底部圆弧中央附近（腿从这里长出）
+
+        limb_color = QColor("#FFFFFF")
+        limb = QPen(limb_color, 3)
+        limb.setCapStyle(Qt.RoundCap)
+        limb.setJoinStyle(Qt.RoundJoin)
+        # 黑色描边画笔：比白线更粗，先画它打底，白线盖上去 → 白腿带黑边，白底下也看得见
+        limb_edge = QPen(QColor("#222222"), 5)
+        limb_edge.setCapStyle(Qt.RoundCap)
+        limb_edge.setJoinStyle(Qt.RoundJoin)
+
+        # ================= 统一坐标系：本体 + 眨眼 + 双腿 + 双臂 =================
+        # 全部画在同一套 translate(pivot)+rotate(swing) 变换内，
+        # 让四肢永远吸附在西瓜身上，一起摇晃/弹跳，绝不脱节。
+        p.save()
+        pivot_x = cx
+        pivot_y = body_bottom
+        p.translate(pivot_x, pivot_y - bob)   # 弹跳
+        p.rotate(swing)                        # 走路左右摇摆
+        p.translate(-pivot_x, -pivot_y)
+
+        # ---- 画西瓜本体（眨眼时整脸切换到闭眼版 pixmap，颜色纹路一致不脱离）----
+        target = QRectF(body_x, body_y, s, s)
+        blinking_now = (self._blinking > 0.35) and (self._pixmap_blink is not None)
+        face_pm = self._pixmap_blink if blinking_now else self._pixmap
+        if face_pm is not None:
+            p.drawPixmap(target, face_pm, QRectF(face_pm.rect()))
+        else:
+            f = QFont()
+            f.setPointSize(int(s * 0.7))
+            p.setFont(f)
+            p.setPen(QColor("#000000"))
+            p.drawText(target, Qt.AlignCenter, "🍉")
+
+        # ---- 两条腿：朝同一方向（向右）行走，一前一后交替迈步 ----
+        DIR = -1                                  # 行进方向：+1 向右，-1 向左
+        leg_len = s * 0.10
+        for i, sign in enumerate((-1, 1)):
+            hip_x = sx(512.0 + sign * 62.0)       # 两腿根靠中央
+            hip_y = melon_bottom
+            # 两条腿相位相差半个周期（一前一后），沿行进方向前后摆
+            phase = math.sin(self._t * 5.0 + (0 if i == 0 else math.pi))
+            foot_x = hip_x + DIR * phase * s * 0.06   # 沿行进方向前后迈
+            foot_y = hip_y + leg_len
+            toe_x = foot_x + DIR * s * 0.05           # 小脚掌：统一朝行进方向
+            leg_a = QPointF(hip_x, hip_y)
+            leg_b = QPointF(foot_x, foot_y)
+            toe_b = QPointF(toe_x, foot_y)
+            # 描边起点从大腿根往下偏一点，让连接身体处不描边、自然融入，越往脚黑边越明显
+            edge_a = QPointF(
+                hip_x + (foot_x - hip_x) * 0.35,
+                hip_y + (foot_y - hip_y) * 0.35,
+            )
+            # 先画黑色描边（粗）打底，再画白线盖上 → 白腿带黑边（根部无边更自然）
+            p.setPen(limb_edge)
+            p.drawLine(edge_a, leg_b)
+            p.drawLine(leg_b, toe_b)
+            p.setPen(limb)
+            p.drawLine(leg_a, leg_b)
+            p.drawLine(leg_b, toe_b)
+
+        # ---- 两条手臂：已按用户要求删除（只保留腿 + 眨眼）----
+        # ---- 眨眼由本体 pixmap 整脸切换实现（见上方 face_pm），此处无需再叠加 ----
+
+        p.restore()
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self._drag_pos = e.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            self._moved = False
+            e.accept()
+
+    def mouseMoveEvent(self, e):
+        if self._drag_pos is not None and (e.buttons() & Qt.LeftButton):
+            self.move(e.globalPosition().toPoint() - self._drag_pos)
+            self._moved = True
+            e.accept()
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            if not self._moved:
+                # 纯单击（未拖动）→ 唤起主界面
+                self.main.summon_to_front()
+            else:
+                # 拖动结束：记住位置
+                try:
+                    g = self.geometry()
+                    self.main.cfg["floating_ball_pos"] = [g.x(), g.y()]
+                    save_config(self.main.cfg)
+                except Exception:
+                    pass
+            self._drag_pos = None
+            e.accept()
+
+    def contextMenuEvent(self, e):
+        t = self.main.theme
+        m = QMenu(self)
+        m.setStyleSheet(f"""
+            QMenu {{
+                background: {t['panel']}; color: {t['text']};
+                border: 1px solid {t['border']}; border-radius: 10px; padding: 6px;
+            }}
+            QMenu::item {{ padding: 8px 22px; border-radius: 8px; }}
+            QMenu::item:selected {{ background: {t['accent']}; color: #FFFFFF; }}
+            QMenu::separator {{ height: 1px; background: {t['border']}; margin: 5px 8px; }}
+        """)
+        act_open = m.addAction("打开主界面")
+        m.addSeparator()
+        act_hide = m.addAction("收起悬浮西瓜")
+        act_quit = m.addAction("退出程序")
+        chosen = m.exec(e.globalPos())
+        if chosen == act_open:
+            self.main.summon_to_front()
+        elif chosen == act_hide:
+            self.main._toggle_floating_ball()
+        elif chosen == act_quit:
+            self.main._real_quit()
 
 
 # ----------------------------------------------------------------------------
@@ -1259,10 +1604,18 @@ class TodoWidget(QWidget):
         self._build_ui()
         self.refresh()
 
+        # 系统托盘图标（让用户在右下角看到程序正在运行）
+        self._setup_tray()
+
         # 定时提醒
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._check_reminders)
         self.timer.start(30000)
+
+        # 恢复桌面悬浮小西瓜状态
+        self.floating_ball = None
+        if self.cfg.get("floating_ball", False):
+            self._show_floating_ball()
 
     # -- 圆角背景绘制 --
     def paintEvent(self, e):
@@ -1522,6 +1875,14 @@ class TodoWidget(QWidget):
         self.proj_pick.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.proj_pick.activated.connect(self._on_project_pick)
         row1.addWidget(self.proj_pick, 1)
+        # 管理项目入口：弹出所有项目可重命名/删除
+        self.btn_proj_manage = QPushButton("⚙")
+        self.btn_proj_manage.setObjectName("secondarybtn")
+        self.btn_proj_manage.setFixedSize(34, 34)
+        self.btn_proj_manage.setToolTip("管理项目（重命名 / 删除）")
+        self.btn_proj_manage.setCursor(Qt.PointingHandCursor)
+        self.btn_proj_manage.clicked.connect(self._manage_projects_dialog)
+        row1.addWidget(self.btn_proj_manage)
         outer.addLayout(row1)
         # 第二行：批量导入 + 导出（各占一半）
         row2 = QHBoxLayout()
@@ -1533,13 +1894,13 @@ class TodoWidget(QWidget):
         self.btn_import.setCursor(Qt.PointingHandCursor)
         self.btn_import.clicked.connect(self._batch_import_dialog)
         row2.addWidget(self.btn_import, 1)
-        self.btn_export = QPushButton("📤 导出完成情况")
+        self.btn_export = QPushButton("导出")
         self.btn_export.setObjectName("secondarybtn")
         self.btn_export.setFixedHeight(34)
         self.btn_export.setCursor(Qt.PointingHandCursor)
         self.btn_export.clicked.connect(self._export_project)
-        row2.addWidget(self.btn_export, 1)
-        self.btn_project_multi = QPushButton("☑ 多选")
+        row2.addWidget(self.btn_export)
+        self.btn_project_multi = QPushButton("多选")
         self.btn_project_multi.setObjectName("secondarybtn")
         self.btn_project_multi.setFixedHeight(34)
         self.btn_project_multi.setCursor(Qt.PointingHandCursor)
@@ -1582,6 +1943,94 @@ class TodoWidget(QWidget):
                 self.selected_ids.clear()
                 self._update_batch_lbl()
             self.refresh()
+
+    # -- 项目管理 --
+    def _manage_projects_dialog(self):
+        """弹窗：列出所有项目，支持重命名 / 删除整个项目"""
+        from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QListWidget,
+                                       QListWidgetItem, QMessageBox, QInputDialog)
+        projs = self.store.projects()
+        dlg = QDialog(self)
+        dlg.setWindowTitle("管理项目")
+        dlg.setStyleSheet(self._dialog_qss())
+        dlg.setMinimumWidth(360)
+        v = QVBoxLayout(dlg)
+        v.setContentsMargins(20, 18, 20, 18)
+        v.setSpacing(10)
+        title = QLabel("⚙ 管理项目")
+        title.setStyleSheet(
+            f"color:{self.theme['text']};font-size:16px;font-weight:bold;")
+        v.addWidget(title)
+        if not projs:
+            v.addWidget(QLabel("暂无项目，先用「批量导入」新建吧～"))
+            bb = QDialogButtonBox(QDialogButtonBox.Ok)
+            bb.accepted.connect(dlg.accept)
+            v.addWidget(bb)
+            dlg.exec()
+            return
+        v.addWidget(QLabel("选中一个项目后可重命名或删除："))
+        lst = QListWidget()
+        for p in projs:
+            total, done = self.store.project_stats(p)
+            it = QListWidgetItem(f"{p}   （{done}/{total}）")
+            it.setData(Qt.UserRole, p)
+            lst.addItem(it)
+        lst.setCurrentRow(0)
+        v.addWidget(lst)
+
+        row = QHBoxLayout()
+        btn_rename = QPushButton("✎ 重命名")
+        btn_rename.setObjectName("secondarybtn")
+        btn_del = QPushButton("🗑 删除项目")
+        btn_del.setObjectName("secondarybtn")
+        row.addWidget(btn_rename, 1)
+        row.addWidget(btn_del, 1)
+        v.addLayout(row)
+
+        bb = QDialogButtonBox(QDialogButtonBox.Close)
+        bb.rejected.connect(dlg.reject)
+        bb.button(QDialogButtonBox.Close).clicked.connect(dlg.reject)
+        v.addWidget(bb)
+
+        def _cur_proj():
+            it = lst.currentItem()
+            return it.data(Qt.UserRole) if it else None
+
+        def _do_rename():
+            p = _cur_proj()
+            if not p:
+                return
+            new, ok = QInputDialog.getText(dlg, "重命名项目", "新的项目名称：", text=p)
+            new = (new or "").strip()
+            if ok and new and new != p:
+                self.store.rename_project(p, new)
+                if self.active_project == p:
+                    self.active_project = new
+                self._refresh_project_pick()
+                self.refresh()
+                dlg.accept()
+
+        def _do_delete():
+            p = _cur_proj()
+            if not p:
+                return
+            total, _ = self.store.project_stats(p)
+            m = QMessageBox(dlg)
+            m.setWindowTitle("删除项目")
+            m.setText(f"确定删除项目「{p}」吗？\n该项目下 {total} 条待办将一并删除，不可恢复。")
+            m.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            m.setDefaultButton(QMessageBox.No)
+            if m.exec() == QMessageBox.Yes:
+                self.store.delete_project(p)
+                if self.active_project == p:
+                    self.active_project = ""
+                self._refresh_project_pick()
+                self.refresh()
+                dlg.accept()
+
+        btn_rename.clicked.connect(_do_rename)
+        btn_del.clicked.connect(_do_delete)
+        dlg.exec()
 
     # -- 批量导入 --
     def _batch_import_dialog(self):
@@ -2063,7 +2512,7 @@ class TodoWidget(QWidget):
         self.btn_project_sel_all.setVisible(self.select_mode and is_project)
         self.btn_multi.setText("✕" if self.select_mode else "☑")
         self.btn_project_multi.setText(
-            "✕ 取消" if self.select_mode else "☑ 多选"
+            "取消" if self.select_mode else "多选"
         )
         self._update_batch_lbl()
         self.refresh()
@@ -2490,8 +2939,10 @@ class TodoWidget(QWidget):
 
         def sort_key(t):
             done_flag = 1 if t["status"] == "done" else 0
+            # 置顶的排在最前（已完成的仍置底，不受置顶影响）
+            pin_flag = 0 if t.get("pinned", False) else 1
             pr = PRIORITY_RANK.get(t.get("priority", "普通"), 2)
-            return (done_flag, pr, due_sort_key(t.get("due", "")),
+            return (done_flag, pin_flag, pr, due_sort_key(t.get("due", "")),
                     rank.get(t["status"], 0), t["created"])
         tasks = sorted(tasks, key=sort_key)
 
@@ -2508,6 +2959,7 @@ class TodoWidget(QWidget):
                 card.toggled.connect(self._on_toggle)
                 card.deleted.connect(self._on_delete)
                 card.edited.connect(self._on_edit)
+                card.pinned.connect(self._on_pin)
                 card.sub_toggled.connect(self._on_sub_toggle)
                 card.select_toggled.connect(self._on_card_select)
                 self.list_lay.insertWidget(i, card)
@@ -2795,6 +3247,16 @@ class TodoWidget(QWidget):
 
     def _on_sub_toggle(self, tid, idx):
         self.store.toggle_sub(tid, idx)
+        self.refresh(animate=False)
+
+    def _on_pin(self, tid):
+        """切换某条待办的置顶状态，并重排列表。"""
+        cur = False
+        for t in self.store.tasks:
+            if t["id"] == tid:
+                cur = bool(t.get("pinned", False))
+                break
+        self.store.update(tid, pinned=not cur)
         self.refresh(animate=False)
 
     def _on_delete(self, tid):
@@ -3299,6 +3761,10 @@ class TodoWidget(QWidget):
         hk = m.addAction(f"快捷键设置（当前 {self._hotkey_label()}）")
         hk.triggered.connect(self._show_hotkey_dialog)
         m.addSeparator()
+        ball = m.addAction(
+            "收起悬浮西瓜" if getattr(self, "floating_ball", None) else "🍉 悬浮桌面小西瓜")
+        ball.triggered.connect(self._toggle_floating_ball)
+        m.addSeparator()
         # 打开数据文件夹
         open_folder = m.addAction("📂 打开数据文件夹")
         open_folder.triggered.connect(self._open_data_folder)
@@ -3333,6 +3799,12 @@ class TodoWidget(QWidget):
         """彻底退出程序（不再驻留后台）"""
         from PySide6.QtWidgets import QApplication
         self._save_cfg()
+        try:
+            if getattr(self, "floating_ball", None) is not None:
+                self.floating_ball.close()
+                self.floating_ball = None
+        except Exception:
+            pass
         QApplication.quit()
 
     def _hotkey_label(self):
@@ -3459,6 +3931,100 @@ class TodoWidget(QWidget):
         self.raise_()
         self.activateWindow()
 
+    # -- 桌面悬浮小西瓜 --
+    def _toggle_floating_ball(self):
+        """开/关桌面悬浮小西瓜，并把状态写入配置。"""
+        on = not bool(getattr(self, "floating_ball", None))
+        self.cfg["floating_ball"] = on
+        if on:
+            self._show_floating_ball()
+        else:
+            self._hide_floating_ball()
+        self._save_cfg()
+
+    def _show_floating_ball(self):
+        if getattr(self, "floating_ball", None) is None:
+            self.floating_ball = FloatingBall(self)
+        self.floating_ball.show()
+        self.floating_ball.raise_()
+
+    def _hide_floating_ball(self):
+        if getattr(self, "floating_ball", None) is not None:
+            try:
+                self.floating_ball.close()
+            except Exception:
+                pass
+            self.floating_ball = None
+
+    # -- 系统托盘 --
+    def _setup_tray(self):
+        """在系统托盘放一个图标（Windows 右下角通知区 / macOS 右上角菜单栏），
+        让用户能直观看到程序在运行，并可通过它显示/隐藏窗口或退出。"""
+        self.tray = None
+        try:
+            if not QSystemTrayIcon.isSystemTrayAvailable():
+                return
+            logo_path = _resource_path("watermelon_logo.svg")
+            icon = QIcon(str(logo_path)) if logo_path.exists() else self.windowIcon()
+            if icon.isNull():
+                # 兜底：用应用图标
+                icon = QApplication.windowIcon()
+            self.tray = QSystemTrayIcon(icon, self)
+            self.tray.setToolTip("西瓜todo 正在运行")
+
+            from PySide6.QtGui import QAction
+            menu = QMenu()
+            act_show = QAction("显示 / 隐藏窗口", self)
+            act_show.triggered.connect(self._toggle_visibility)
+            act_quit = QAction("退出", self)
+            act_quit.triggered.connect(self._quit_from_tray)
+            menu.addAction(act_show)
+            menu.addSeparator()
+            menu.addAction(act_quit)
+            self.tray.setContextMenu(menu)
+
+            # 双击 / 单击托盘图标：唤起窗口到前台
+            self.tray.activated.connect(self._on_tray_activated)
+            self.tray.show()
+
+            # 首次运行时弹一条气泡提示，告诉用户去哪找它（不同系统托盘位置不同）
+            if not self.cfg.get("tray_tip_shown", False):
+                if sys.platform == "darwin":
+                    tray_where = "屏幕右上角菜单栏"   # macOS 状态栏在顶部
+                else:
+                    tray_where = "屏幕右下角托盘"       # Windows / Linux 在右下角
+                try:
+                    self.tray.showMessage(
+                        "西瓜todo 已启动",
+                        f"窗口在桌面上；关闭窗口后可在{tray_where}的小西瓜里重新打开。",
+                        QSystemTrayIcon.Information, 5000)
+                except Exception:
+                    pass
+                self.cfg["tray_tip_shown"] = True
+                save_config(self.cfg)
+        except Exception:
+            self.tray = None
+
+    def _on_tray_activated(self, reason):
+        # 双击或单击（Trigger）都唤起窗口
+        if reason in (QSystemTrayIcon.DoubleClick, QSystemTrayIcon.Trigger):
+            self.summon_to_front()
+
+    def _toggle_visibility(self):
+        if self.isVisible():
+            self.hide()
+        else:
+            self.summon_to_front()
+
+    def _quit_from_tray(self):
+        """从托盘菜单彻底退出：先移除托盘图标，再走正常关闭流程。"""
+        try:
+            if getattr(self, "tray", None) is not None:
+                self.tray.hide()
+        except Exception:
+            pass
+        self.close()
+
     def _toggle_topmost(self):
         cur = self.cfg.get("topmost", False)
         self.cfg["topmost"] = not cur
@@ -3554,6 +4120,20 @@ class TodoWidget(QWidget):
 
     def closeEvent(self, e):
         self._save_cfg()
+        # 移除托盘图标，避免退出后残留
+        try:
+            if getattr(self, "tray", None) is not None:
+                self.tray.hide()
+                self.tray = None
+        except Exception:
+            pass
+        # 关闭悬浮小西瓜，避免残留在桌面
+        try:
+            if getattr(self, "floating_ball", None) is not None:
+                self.floating_ball.close()
+                self.floating_ball = None
+        except Exception:
+            pass
         # 彻底退出：释放单实例锁 + 注销全局热键，避免进程残留导致下次打不开
         try:
             global _single_server

@@ -15,6 +15,7 @@ env:
   SRC_DIR: v2
   PY_FILE: todo_qt_v2.py
   SVG_FILE: watermelon_logo.svg
+  BALL_FILE: watermelon_ball.svg
 
 jobs:
   # ========================= Windows：exe + Setup 安装程序 =========================
@@ -84,6 +85,7 @@ jobs:
             --name "西瓜todo" \
             --icon "watermelon.ico" \
             --add-data "$SVG_FILE;." \
+            --add-data "$BALL_FILE;." \
             "$PY_FILE"
           ls -la dist
 
@@ -213,6 +215,7 @@ jobs:
             --icon "watermelon.icns" \
             --osx-bundle-identifier "$APP_ID" \
             --add-data "$SVG_FILE:." \
+            --add-data "$BALL_FILE:." \
             "$PY_FILE"
 
       - name: 临时签名并生成 DMG

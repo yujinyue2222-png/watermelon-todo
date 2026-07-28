@@ -16,9 +16,11 @@
   v2.5  (2026-07-27) 优化：再次双击程序时自动把已运行窗口召回前台（不再静默无反应）
   v2.6  (2026-07-28) 优化：桌面悬浮小西瓜腿部黑色描边（白底可见、连接处自然）；
                       置顶待办卡片外观与普通待办一致，仅保留右上角钉子标记
+  v2.7  (2026-07-28) 新增：悬浮小西瓜跑动速度随未完成待办数量变化（越多跑越快）；
+                      修复 macOS 端悬浮西瓜未打包透明 SVG 导致的"没抠图"问题
 """
 
-APP_VERSION = "2.6"
+APP_VERSION = "2.7"
 # 检查更新用：GitHub 仓库最新 Release 接口 + 下载页地址
 UPDATE_API = "https://api.github.com/repos/yujinyue2222-png/watermelon-todo/releases/latest"
 RELEASE_PAGE = "https://github.com/yujinyue2222-png/watermelon-todo/releases/latest"
@@ -1371,12 +1373,27 @@ class FloatingBall(QWidget):
         except Exception:
             self.move(1000, 600)
 
+    def _current_speed(self):
+        """根据未完成待办数量算出跑动速度倍率：待办越多跑越快（有上下限）。
+        0 个 → 0.5（悠闲散步）；每多 1 个 +0.1；封顶 1.6（快步走，不至于太夸张）。"""
+        try:
+            total, done, _urgent = self.main.store.stats()
+            todo_n = max(0, total - done)
+        except Exception:
+            todo_n = 0
+        return max(0.5, min(1.6, 0.5 + todo_n * 0.1))
+
     def _on_anim_tick(self):
         # 窗口不可见时不重绘，省 CPU（被完全遮挡/隐藏时避免空转 33fps）
         if not self.isVisible():
             return
-        # 走路计时
-        self._t += 0.03
+        # 每 20 帧刷新一次速度倍率（依据未完成待办数量），避免每帧都算
+        self._speed_tick = getattr(self, "_speed_tick", 0) + 1
+        if self._speed_tick >= 20 or not hasattr(self, "_speed"):
+            self._speed_tick = 0
+            self._speed = self._current_speed()
+        # 走路计时：速度越快，时间推进越快 → 步频/弹跳都更快
+        self._t += 0.03 * self._speed
         # 随机眨眼：正在眨则递减，否则按概率触发一次眨眼
         if self._blinking > 0:
             self._blinking -= 0.08
@@ -1402,10 +1419,12 @@ class FloatingBall(QWidget):
         body_y = self.PAD_TOP
         body_bottom = body_y + s                # 西瓜本体底边
 
-        # 走路相位
+        # 走路相位（speed 越大：步频已由 _t 加速，这里再放大摆幅/弹跳，跑得更有劲）
+        spd = getattr(self, "_speed", 1.0)
+        vigor = min(1.0, max(0.0, (spd - 0.5) / 1.1))  # 0(悠闲)~1(快步) 的活力系数
         walk = math.sin(self._t * 5.0)          # -1..1
-        swing = walk * 5.0                       # 身体左右摆动角度（度）
-        bob = abs(math.sin(self._t * 5.0)) * 2.0  # 上下弹跳（像走路一样一颠一颠）
+        swing = walk * (5.0 + vigor * 4.0)       # 身体左右摆动角度（度）：越快摆越大
+        bob = abs(math.sin(self._t * 5.0)) * (2.0 + vigor * 4.0)  # 上下弹跳：越快颠得越高
 
         # ===== 依据 watermelon_ball.svg 真实几何（viewBox 1024，三角形西瓜）=====
         # 顶点(512,100)；底边圆弧 Q512 888 813 827，最低点在正中央(512,888)；
@@ -1457,7 +1476,8 @@ class FloatingBall(QWidget):
             hip_y = melon_bottom
             # 两条腿相位相差半个周期（一前一后），沿行进方向前后摆
             phase = math.sin(self._t * 5.0 + (0 if i == 0 else math.pi))
-            foot_x = hip_x + DIR * phase * s * 0.06   # 沿行进方向前后迈
+            stride = 0.06 + vigor * 0.05              # 迈步幅度：越快甩得越开
+            foot_x = hip_x + DIR * phase * s * stride   # 沿行进方向前后迈
             foot_y = hip_y + leg_len
             toe_x = foot_x + DIR * s * 0.05           # 小脚掌：统一朝行进方向
             leg_a = QPointF(hip_x, hip_y)

@@ -145,7 +145,7 @@ jobs:
           DefaultDirName={autopf}\WatermelonTodo
           DefaultGroupName=西瓜todo
           OutputDir=dist
-          OutputBaseFilename=西瓜todo-${{ steps.ver.outputs.version }}-Setup
+          OutputBaseFilename=西瓜todo-${{ steps.ver.outputs.version }}-win版-Setup
           SetupIconFile=watermelon.ico
           Compression=lzma2
           SolidCompression=yes
@@ -179,7 +179,7 @@ jobs:
           fi
           "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" watermelon_todo.iss
           # 给便携版 exe 复制一个带「便携版」备注的名字，方便下载页区分
-          cp "dist/西瓜todo.exe" "dist/西瓜todo-${{ steps.ver.outputs.version }}-便携版.exe"
+          cp "dist/西瓜todo.exe" "dist/西瓜todo-${{ steps.ver.outputs.version }}-win版-便携版.exe"
           ls -la dist
 
       - name: 上传 Windows 产物
@@ -308,7 +308,7 @@ jobs:
           cp -R "dist/$APP_NAME.app" dmg_stage/
           ln -s /Applications dmg_stage/Applications
           hdiutil create -volname "$APP_NAME" -srcfolder dmg_stage -ov -format UDZO \
-            "dist/$APP_NAME-${{ steps.ver.outputs.version }}-mac.dmg"
+            "dist/$APP_NAME-${{ steps.ver.outputs.version }}-mac版.dmg"
 
       - name: 上传 Mac 产物
         uses: actions/upload-artifact@v4
@@ -349,11 +349,11 @@ jobs:
             请根据你的系统下载对应版本（文件名中的版本号即本次发布版本）：
 
             ### 🪟 Windows 版
-            - 安装版（推荐普通用户）：`西瓜todo-${{ steps.ver.outputs.version }}-Setup.exe`，双击安装，自动创建桌面快捷方式
-            - 便携版（免安装）：`西瓜todo-${{ steps.ver.outputs.version }}-便携版.exe`，双击即用（适合放 U 盘或临时使用）
+            - 安装版（推荐普通用户）：`西瓜todo-${{ steps.ver.outputs.version }}-win版-Setup.exe`，双击安装，自动创建桌面快捷方式
+            - 便携版（免安装）：`西瓜todo-${{ steps.ver.outputs.version }}-win版-便携版.exe`，双击即用（适合放 U 盘或临时使用）
 
             ### 🍎 Mac 版
-            - `西瓜todo-${{ steps.ver.outputs.version }}-mac.dmg`，双击后把 西瓜todo 拖进「应用程序」
+            - `西瓜todo-${{ steps.ver.outputs.version }}-mac版.dmg`，双击后把 西瓜todo 拖进「应用程序」
 
             #### 首次打开的安全提示（正常现象，放心使用）
             本软件未购买付费数字签名，首次打开时系统可能拦截，按下面操作即可：

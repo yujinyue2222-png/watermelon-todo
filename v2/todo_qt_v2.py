@@ -18,9 +18,12 @@
                       置顶待办卡片外观与普通待办一致，仅保留右上角钉子标记
   v2.7  (2026-07-28) 新增：悬浮小西瓜跑动速度随未完成待办数量变化（越多跑越快）；
                       修复 macOS 端悬浮西瓜未打包透明 SVG 导致的"没抠图"问题
+  v2.10 (2026-07-29) 修复：macOS 端悬浮窗口鼠标滑过会抢走其他 app 键盘焦点的问题；
+                      优化：首页"今日"统计只计入日常待办（排除项目待办）且仅算今天/过期/无日期的；
+                      优化：项目待办 tab 顶部统计改为显示该项目"完成/总计"
 """
 
-APP_VERSION = "2.7"
+APP_VERSION = "2.10"
 # 检查更新用：GitHub 仓库最新 Release 接口 + 下载页地址
 UPDATE_API = "https://api.github.com/repos/yujinyue2222-png/watermelon-todo/releases/latest"
 RELEASE_PAGE = "https://github.com/yujinyue2222-png/watermelon-todo/releases/latest"
@@ -60,6 +63,42 @@ from PySide6.QtGui import (
 # 路径
 # ----------------------------------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _float_window_flags(topmost: bool = False):
+    """桌面悬浮窗口的窗口标志。
+
+    Windows/Linux 使用 Qt.Tool 以隐藏任务栏图标；
+    macOS 上 Qt.Tool 会被映射成 NSPanel —— 鼠标滑过窗口即自动成为
+    key window，抢走其他应用正在输入的键盘焦点，因此 macOS 改用
+    普通 Qt.Window（NSWindow），配合 _apply_no_steal_focus 阻止抢焦点。
+    """
+    flags = Qt.FramelessWindowHint
+    flags |= Qt.Window if IS_MAC else Qt.Tool
+    if topmost:
+        flags |= Qt.WindowStaysOnTopHint
+    return flags
+
+
+def _apply_no_steal_focus(widget, accept_focus: bool = True):
+    """让悬浮窗口显示时不主动激活、鼠标滑过不抢键盘焦点（主要针对 macOS）。
+
+    - WA_ShowWithoutActivating：show() 时不把窗口设为激活窗口；
+    - WA_MacAlwaysShowToolWindow：macOS 上即使非激活也保持可见；
+    - accept_focus=False 时进一步禁止窗口接收键盘焦点（用于纯展示/点击的
+      悬浮小西瓜；主面板与输入弹窗需要输入，保持 True）。
+    """
+    try:
+        widget.setAttribute(Qt.WA_ShowWithoutActivating, True)
+        if IS_MAC:
+            try:
+                widget.setAttribute(Qt.WA_MacAlwaysShowToolWindow, True)
+            except Exception:
+                pass
+        if not accept_focus:
+            widget.setFocusPolicy(Qt.NoFocus)
+    except Exception:
+        pass
 
 
 def _resource_path(name: str) -> Path:
@@ -226,6 +265,18 @@ class _StyledCalendarWidget(QCalendarWidget):
     def __init__(self, theme, parent=None):
         super().__init__(parent)
         self._theme = theme
+        # 月份按钮默认带下拉箭头（˅），会让「七月」文字上下错落；
+        # 设为纯文字样式并去掉箭头，让月/年文字水平居中不错位。
+        try:
+            from PySide6.QtWidgets import QToolButton
+            for btn in self.findChildren(QToolButton):
+                name = btn.objectName()
+                if name in ("qt_calendar_monthbutton", "qt_calendar_yearbutton"):
+                    btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
+                    btn.setPopupMode(QToolButton.InstantPopup)
+                    btn.setArrowType(Qt.NoArrow)
+        except Exception:
+            pass
 
     def paintCell(self, painter: QPainter, rect: QRect, date: QDate) -> None:
         if date != self.selectedDate():
@@ -272,30 +323,30 @@ CHEER_QUOTES = [
     "{name}，完成的每一件都值得鼓励 🎉",
     "{name}，别忘了对自己好一点 ☕",
     "{name}，前进一小步也是胜利 🚀",
-    "{name}，你比想象中更棒 💖",
-    "{name}，把大事拆小，就不难啦 📌",
-    "{name}，深呼吸，开始行动吧 🌈",
-    "{name}，今天的努力都算数 ⭐",
-    "{name}，冲鸭，好运在路上 🍭",
-    "{name}，你已经很努力了，别太苛责自己 🫶",
-    "{name}，做完一件就奖励自己一下吧 🍰",
-    "{name}，星光不问赶路人，加油 🌟",
-    "{name}，先完成，再完美 ✍️",
-    "{name}，休息也是效率的一部分 😴",
-    "{name}，你今天的样子超级可爱 🐻",
-    "{name}，再坚持一下下就好啦 🐣",
-    "{name}，把焦虑写进清单，它就变小了 📝",
-    "{name}，今天也是被期待的一天呀 🌤️",
-    "{name}，稳住，我们能赢 🎮",
-    "{name}，一步一步，风景都在路上 🚶",
-    "{name}，别急，好事正在发生 🌷",
-    "{name}，你值得所有的好运气 🍀",
-    "{name}，喝口水，继续发光吧 💡",
-    "{name}，完成度 > 完美度，先动起来 ⚡",
-    "{name}，今天的你也在悄悄变强 🌱",
-    "{name}，累了就抱抱西瓜再出发 🍉",
-    "{name}，把注意力放在下一小步就好 🎯",
-    "{name}，你的坚持终会开花 🌸",
+    "{name}，你比想象中更棒💖",
+    "{name}，把大事拆小，就不难啦📌",
+    "{name}，深呼吸，开始行动吧🌈",
+    "{name}，今天的努力都算数⭐",
+    "{name}，冲鸭，好运在路上🍭",
+    "{name}，你已经很努力了，别太苛责自己🫶",
+    "{name}，做完一件就奖励自己一下吧🍰",
+    "{name}，星光不问赶路人，加油🌟",
+    "{name}，先完成，再完美✍️",
+    "{name}，休息也是效率的一部分😴",
+    "{name}，你今天的样子超级可爱🐻",
+    "{name}，再坚持一下下就好啦🐣",
+    "{name}，把焦虑写进清单，它就变小了📝",
+    "{name}，今天也是被期待的一天呀🌤️",
+    "{name}，稳住，我们能赢🎮",
+    "{name}，一步一步，风景都在路上🚶",
+    "{name}，别急，好事正在发生🌷",
+    "{name}，你值得所有的好运气🍀",
+    "{name}，喝口水，继续发光吧💡",
+    "{name}，完成度 > 完美度，先动起来⚡",
+    "{name}，今天的你也在悄悄变强🌱",
+    "{name}，累了就抱抱西瓜再出发🍉",
+    "{name}，把注意力放在下一小步就好🎯",
+    "{name}，你的坚持终会开花🌸",
 ]
 
 
@@ -547,9 +598,22 @@ class Store:
         self.save()
 
     def stats(self):
-        total = len(self.tasks)
-        done = sum(1 for t in self.tasks if t["status"] == "done")
-        urgent = sum(1 for t in self.tasks
+        """首页「今日」统计口径：只算【日常待办】(project 为空) 中，
+        截止日期在今天(含已过期)或没填日期的任务；未来日期(明天及以后)
+        不计入，项目待办的任务也不计入——日常/项目是两个独立 tab。"""
+        today = datetime.date.today()
+
+        def _is_today_daily(t):
+            if t.get("project", ""):          # 属于项目待办，排除
+                return False
+            d, _ = parse_due(t.get("due", ""))
+            # 没填/解析失败 视为当天任务；已填则须 <= 今天
+            return d is None or d <= today
+
+        today_tasks = [t for t in self.tasks if _is_today_daily(t)]
+        total = len(today_tasks)
+        done = sum(1 for t in today_tasks if t["status"] == "done")
+        urgent = sum(1 for t in today_tasks
                      if t["status"] != "done"
                      and t.get("priority") in URGENT_PRIORITIES)
         return total, done, urgent
@@ -636,10 +700,12 @@ def due_label(due):
 
 
 def due_sort_key(due):
-    """无截止时间排最后（按 datetime 精确排序）"""
+    """无截止时间视为「当天任务」（逻辑 due = 今天 23:59），
+    而非排到最后。这样没填时间的默认当天，与填了远期日期的任务
+    在同一优先级下按逻辑 due 早晚排序。"""
     dt = due_datetime(due)
     if dt is None:
-        return datetime.datetime.max
+        return datetime.datetime.combine(datetime.date.today(), datetime.time(23, 59))
     return dt
 
 
@@ -767,8 +833,8 @@ class ReminderPopup(QWidget):
         super().__init__(None)
         self.theme = theme
         self._result_loop = None
-        self.setWindowFlags(
-            Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
+        self.setWindowFlags(_float_window_flags(topmost=True))
+        _apply_no_steal_focus(self, accept_focus=True)
         self.setAttribute(Qt.WA_TranslucentBackground)
         # 铺满当前屏幕，做居中的遮罩效果
         try:
@@ -1309,8 +1375,8 @@ class FloatingBall(QWidget):
         # 控件比西瓜本体大一圈，容纳摆动/弹跳/腿的空间
         self.W = self.SIZE + self.PAD_X * 2
         self.H = self.SIZE + self.PAD_TOP + self.PAD_BOTTOM
-        self.setWindowFlags(
-            Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
+        self.setWindowFlags(_float_window_flags(topmost=True))
+        _apply_no_steal_focus(self, accept_focus=False)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setFixedSize(self.W, self.H)
         self.setCursor(Qt.PointingHandCursor)
@@ -1613,8 +1679,8 @@ class TodoWidget(QWidget):
         self._load_bg_image()
 
         self.setWindowFlags(
-            Qt.FramelessWindowHint | Qt.Tool |
-            (Qt.WindowStaysOnTopHint if self.cfg.get("topmost", False) else Qt.Widget))
+            _float_window_flags(topmost=self.cfg.get("topmost", False)))
+        _apply_no_steal_focus(self, accept_focus=True)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setWindowTitle("西瓜todo")
 
@@ -1949,24 +2015,24 @@ class TodoWidget(QWidget):
         self.btn_import.clicked.connect(self._batch_import_dialog)
         row2.addWidget(self.btn_import, 3)
         self.btn_export = QPushButton("⬇ 导出")
-        self.btn_export.setObjectName("exportbtn")
+        self.btn_export.setObjectName("secondarybtn")
         self.btn_export.setFixedHeight(36)
         self.btn_export.setCursor(Qt.PointingHandCursor)
         self.btn_export.clicked.connect(self._export_project)
-        row2.addWidget(self.btn_export, 2)
+        row2.addWidget(self.btn_export, 1)
         self.btn_project_multi = QPushButton("多选")
         self.btn_project_multi.setObjectName("secondarybtn")
         self.btn_project_multi.setFixedHeight(36)
         self.btn_project_multi.setCursor(Qt.PointingHandCursor)
         self.btn_project_multi.clicked.connect(self._toggle_select_mode)
-        row2.addWidget(self.btn_project_multi, 2)
+        row2.addWidget(self.btn_project_multi, 1)
         self.btn_project_sel_all = QPushButton("全选")
         self.btn_project_sel_all.setObjectName("selallbtn")
         self.btn_project_sel_all.setFixedHeight(36)
         self.btn_project_sel_all.setCursor(Qt.PointingHandCursor)
         self.btn_project_sel_all.clicked.connect(self._batch_select_all)
         self.btn_project_sel_all.setVisible(False)
-        row2.addWidget(self.btn_project_sel_all, 2)
+        row2.addWidget(self.btn_project_sel_all, 1)
         outer.addLayout(row2)
         self.project_bar = bar
         bar.setVisible(False)
@@ -2331,32 +2397,14 @@ class TodoWidget(QWidget):
         pr.setCurrentText("普通")
         pr.setFixedHeight(26)
         rl2.addWidget(pr, 1)
-
-        rmd = QComboBox()
-        rmd.setObjectName("inlinermd")
-        rmd.addItems(list(REMIND_TYPES.keys()))
-        rmd.setCurrentText("到期当天")
-        rmd.setFixedHeight(26)
-        rl2.addWidget(rmd, 1)
         outer.addLayout(rl2)
 
-        # 第三行：循环 + 循环截止
-        rl3 = QHBoxLayout()
-        rl3.setSpacing(6)
-        rc = QComboBox()
-        rc.setObjectName("inlinerc")
-        rc.addItems(RECUR_TYPES)
-        rc.setCurrentText("不循环")
-        rc.setFixedHeight(26)
-        rl3.addWidget(rc, 1)
+        # 提醒时间已合并到「日期弹窗」底部
+        self._inline_remind_val = "到期当天"
 
+        # 循环设置已合并到「日期弹窗」底部，内联行不再单独放循环行（减少按钮）
+        self._inline_recur_val = "不循环"
         self._inline_rend_val = ""
-        btn_rend = QPushButton("循环截止日期")
-        btn_rend.setObjectName("inlinerend")
-        btn_rend.setFixedHeight(26)
-        btn_rend.setCursor(Qt.PointingHandCursor)
-        rl3.addWidget(btn_rend, 1)
-        outer.addLayout(rl3)
 
         row.setStyleSheet(
             f"#inlinerow{{background:{self.theme['card']};border:1px solid "
@@ -2396,21 +2444,18 @@ class TodoWidget(QWidget):
         self._inline_datebtn = btn_cal
         self._inline_pr = pr
         self._inline_ct = ct
-        self._inline_rmd = rmd
-        self._inline_rc = rc
-        self._inline_rendbtn = btn_rend
+        self._inline_rmd = None
+        self._inline_rc = None
+        self._inline_rendbtn = None
 
         def pick_date():
             self._pick_inline_due()
-        def pick_rend():
-            self._pick_inline_recur_end()
         def save():
             self._save_inline()
         def cancel():
             self._close_inline()
 
         btn_cal.clicked.connect(pick_date)
-        btn_rend.clicked.connect(pick_rend)
         btn_ok.clicked.connect(save)
         btn_cancel.clicked.connect(cancel)
         ed.returnPressed.connect(save)
@@ -2432,11 +2477,18 @@ class TodoWidget(QWidget):
                 else "循环截止日期")
 
     def _pick_inline_due(self):
-        """为内联编辑行选择截止日期（复用日历弹窗，写入 _inline_due）"""
+        """为内联编辑行选择截止日期（复用日历弹窗，写入 _inline_due）。
+
+        循环设置已合并进日期弹窗：传入 recur_state，选完写回 _inline_recur_val。
+        """
         prev = self._pending_due
         self._pending_due = self._inline_due
-        self._pick_due()
+        recur_state = {"val": getattr(self, "_inline_recur_val", "不循环")}
+        remind_state = {"val": getattr(self, "_inline_remind_val", "到期当天")}
+        self._pick_due(recur_state=recur_state, remind_state=remind_state)
         self._inline_due = self._pending_due
+        self._inline_recur_val = recur_state.get("val") or "不循环"
+        self._inline_remind_val = remind_state.get("val") or "到期当天"
         self._pending_due = prev
         self._update_inline_date_display()
 
@@ -2463,10 +2515,9 @@ class TodoWidget(QWidget):
             self.active_cat if self.active_cat != "全部" else "其他")
         self.store.add(text, cat, due=self._inline_due,
                        priority=self._inline_pr.currentText(),
-                       recur=self._inline_rc.currentText(),
+                       recur=getattr(self, "_inline_recur_val", "不循环"),
                        recur_end=getattr(self, "_inline_rend_val", ""),
-                       remind=self._inline_rmd.currentText() if getattr(
-                           self, "_inline_rmd", None) is not None else "到期当天")
+                       remind=getattr(self, "_inline_remind_val", "到期当天"))
         self._reset_inline_refs()
         self.refresh()
 
@@ -2480,6 +2531,8 @@ class TodoWidget(QWidget):
         self._inline_rc = None
         self._inline_rendbtn = None
         self._inline_rend_val = ""
+        self._inline_recur_val = "不循环"
+        self._inline_remind_val = "到期当天"
         self._inline_due = ""
 
     def _close_inline(self):
@@ -3089,11 +3142,21 @@ class TodoWidget(QWidget):
         w._anim = anim
 
     def _update_stats(self):
-        total, done, urgent = self.store.stats()
-        if urgent > 0:
-            self.stats_text.setText(f"今日 {done}/{total}   🔥紧急 {urgent}")
+        if self.view_mode == "project":
+            # 项目待办 tab：展示当前项目的「完成/总计」，不展示今日
+            if self.active_project:
+                p_total, p_done = self.store.project_stats(self.active_project)
+            else:
+                p_total, p_done = 0, 0
+            total, done = p_total, p_done
+            self.stats_text.setText(f"{self.active_project or '项目'} {done}/{total}")
         else:
-            self.stats_text.setText(f"今日 {done}/{total}")
+            # 日常待办 tab：今日口径（只算日常、今天/过期/无日期）
+            total, done, urgent = self.store.stats()
+            if urgent > 0:
+                self.stats_text.setText(f"今日 {done}/{total}   🔥紧急 {urgent}")
+            else:
+                self.stats_text.setText(f"今日 {done}/{total}")
         pct = int(done / total * 100) if total else 0
         self.stats_pct.setText(f"{pct}%")
         # 进度条动画
@@ -3167,12 +3230,19 @@ class TodoWidget(QWidget):
         self.cat_btns[name] = b
         self.catbar.insertWidget(self.catbar.indexOf(self.btn_new_cat), b)
 
-    def _pick_due(self):
-        """弹出日历选择截止时间，并可选精确到时间点"""
+    def _pick_due(self, recur_state=None, remind_state=None):
+        """弹出日历选择截止时间，并可选精确到时间点。
+
+        recur_state: 可选 dict，形如 {"val": "不循环"}。传入时弹窗底部
+        显示「循环重复」下拉，确定后将选中值写回 recur_state["val"]。
+        remind_state: 可选 dict，形如 {"val": "到期当天"}。传入时弹窗底部
+        显示「提醒时间」下拉，确定后写回 remind_state["val"]。
+        二者合并进日期弹窗，减少待办卡片上的按钮。
+        """
         from PySide6.QtWidgets import (QDialog, QVBoxLayout,
                                        QDialogButtonBox, QHBoxLayout, QPushButton,
                                        QCheckBox, QTimeEdit, QFrame, QLabel,
-                                       QAbstractSpinBox)
+                                       QComboBox, QAbstractSpinBox)
         from PySide6.QtCore import QDate, QLocale, QTime
         from PySide6.QtGui import QTextCharFormat, QColor
         dlg = QDialog(self)
@@ -3285,6 +3355,42 @@ class TodoWidget(QWidget):
         trow.addWidget(time_edit)
         v.addWidget(time_card)
 
+        # 循环设置行（仅在传入 recur_state 时显示；把「是否循环」合并进日期弹窗）
+        recur_pick = None
+        if recur_state is not None:
+            recur_card = QFrame()
+            recur_card.setObjectName("timeCard")
+            rrow = QHBoxLayout(recur_card)
+            rrow.setContentsMargins(12, 9, 12, 9)
+            rrow.setSpacing(10)
+            rrow.addWidget(QLabel("循环重复"))
+            rrow.addStretch()
+            recur_pick = QComboBox()
+            recur_pick.setObjectName("timeEdit")
+            recur_pick.addItems(RECUR_TYPES)
+            recur_pick.setCurrentText(recur_state.get("val") or "不循环")
+            recur_pick.setMinimumWidth(120)
+            rrow.addWidget(recur_pick)
+            v.addWidget(recur_card)
+
+        # 提醒时间行（仅在传入 remind_state 时显示；把「提醒」合并进日期弹窗）
+        remind_pick = None
+        if remind_state is not None:
+            remind_card = QFrame()
+            remind_card.setObjectName("timeCard")
+            mrow = QHBoxLayout(remind_card)
+            mrow.setContentsMargins(12, 9, 12, 9)
+            mrow.setSpacing(10)
+            mrow.addWidget(QLabel("提醒时间"))
+            mrow.addStretch()
+            remind_pick = QComboBox()
+            remind_pick.setObjectName("timeEdit")
+            remind_pick.addItems(list(REMIND_TYPES.keys()))
+            remind_pick.setCurrentText(remind_state.get("val") or "到期当天")
+            remind_pick.setMinimumWidth(120)
+            mrow.addWidget(remind_pick)
+            v.addWidget(remind_card)
+
         row = QHBoxLayout()
         btn_clear = QPushButton("清除")
         btn_clear.setObjectName("dangerGhost")
@@ -3305,6 +3411,10 @@ class TodoWidget(QWidget):
             if chk_time.isChecked():
                 due += " " + time_edit.time().toString("HH:mm")
             self._pending_due = due
+            if recur_state is not None and recur_pick is not None:
+                recur_state["val"] = recur_pick.currentText()
+            if remind_state is not None and remind_pick is not None:
+                remind_state["val"] = remind_pick.currentText()
             self._update_date_btn()
 
     def _update_date_btn(self):
@@ -3446,6 +3556,16 @@ class TodoWidget(QWidget):
             QCalendarWidget QToolButton:hover {{
                 color: {t['accent']};
                 background: {_qss_alpha(t['accent'], 0x18)};
+            }}
+            /* 月份/年份按钮：去掉下拉箭头指示器，避免「七月˅」文字错落 */
+            QCalendarWidget QToolButton#qt_calendar_monthbutton,
+            QCalendarWidget QToolButton#qt_calendar_yearbutton {{
+                padding: 2px 14px; margin: 0 2px;
+            }}
+            QCalendarWidget QToolButton#qt_calendar_monthbutton::menu-indicator,
+            QCalendarWidget QToolButton#qt_calendar_yearbutton::menu-indicator {{
+                image: none; width: 0; height: 0;
+                subcontrol-position: right center;
             }}
             QCalendarWidget QToolButton#qt_calendar_prevmonth,
             QCalendarWidget QToolButton#qt_calendar_nextmonth {{
@@ -4133,10 +4253,8 @@ class TodoWidget(QWidget):
     def _toggle_topmost(self):
         cur = self.cfg.get("topmost", False)
         self.cfg["topmost"] = not cur
-        flags = Qt.FramelessWindowHint | Qt.Tool
-        if self.cfg["topmost"]:
-            flags |= Qt.WindowStaysOnTopHint
-        self.setWindowFlags(flags)
+        self.setWindowFlags(_float_window_flags(topmost=self.cfg["topmost"]))
+        _apply_no_steal_focus(self, accept_focus=True)
         self.show()
         self._save_cfg()
 

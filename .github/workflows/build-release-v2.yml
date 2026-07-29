@@ -324,6 +324,11 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: 从 tag 提取版本号（去掉 v 前缀）
+        id: ver
+        run: |
+          TAG="${{ github.ref_name }}"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
       - name: 下载 Windows 产物
         uses: actions/download-artifact@v4
         with:
@@ -341,11 +346,14 @@ jobs:
           body: |
             ## 西瓜todo ${{ github.ref_name }}
 
-            下载适合你系统的版本：
+            请根据你的系统下载对应版本（文件名中的版本号即本次发布版本）：
 
-            - Windows 安装版：`西瓜todo-*-Setup.exe`，双击安装，自动创建桌面快捷方式（推荐普通用户）
-            - Windows 便携版：`西瓜todo-*-便携版.exe`，免安装，双击即用（适合放 U 盘或临时使用）
-            - Mac 用户：下载 `西瓜todo-*-mac.dmg`，双击后把 西瓜todo 拖进「应用程序」
+            ### 🪟 Windows 版
+            - 安装版（推荐普通用户）：`西瓜todo-${{ steps.ver.outputs.version }}-Setup.exe`，双击安装，自动创建桌面快捷方式
+            - 便携版（免安装）：`西瓜todo-${{ steps.ver.outputs.version }}-便携版.exe`，双击即用（适合放 U 盘或临时使用）
+
+            ### 🍎 Mac 版
+            - `西瓜todo-${{ steps.ver.outputs.version }}-mac.dmg`，双击后把 西瓜todo 拖进「应用程序」
 
             #### 首次打开的安全提示（正常现象，放心使用）
             本软件未购买付费数字签名，首次打开时系统可能拦截，按下面操作即可：

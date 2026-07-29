@@ -1986,11 +1986,8 @@ class TodoWidget(QWidget):
         row1 = QHBoxLayout()
         row1.setContentsMargins(0, 0, 0, 0)
         row1.setSpacing(6)
-        lbl = QLabel("项目")
-        lbl.setObjectName("projlbl")
-        row1.addWidget(lbl)
         self.proj_pick = QComboBox(self)
-        self.proj_pick.setObjectName("catpick")
+        self.proj_pick.setObjectName("projpick")
         self.proj_pick.setMinimumHeight(34)
         self.proj_pick.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.proj_pick.activated.connect(self._on_project_pick)
@@ -2817,6 +2814,12 @@ class TodoWidget(QWidget):
                 image: none; width: 0; height: 0; border: none;
             }}
             QComboBox#catpick::drop-down {{ border: none; width: 30px; }}
+            QComboBox#projpick {{
+                background: {t['panel']}; border: 1px solid {t['border']};
+                border-radius: 12px; padding: 0 8px; color: {t['text']};
+                font-size: 12px; font-weight: 500;
+            }}
+            QComboBox#projpick::drop-down {{ border: none; width: 30px; }}
             QLabel#projlbl {{ color: {t['sub']}; font-size: 13px; font-weight: bold; }}
             QComboBox#prpick {{
                 background: {t['panel']}; border: 1px solid {t['border']};
@@ -2837,7 +2840,7 @@ class TodoWidget(QWidget):
             QPushButton#secondarybtn {{
                 background: {t['panel']}; border: 1px solid {t['border']};
                 border-radius: 11px; color: {t['text']};
-                font-size: 12px; font-weight: 600;
+                font-size: 12px; font-weight: 500;
             }}
             QPushButton#secondarybtn:hover {{
                 color: {t['accent']}; border-color: {t['accent']};
@@ -2846,14 +2849,14 @@ class TodoWidget(QWidget):
             QPushButton#exportbtn {{
                 background: #22B07D; border: none;
                 border-radius: 11px; color: #FFFFFF;
-                font-size: 12px; font-weight: 700;
+                font-size: 12px; font-weight: 500;
             }}
             QPushButton#exportbtn:hover {{ background: #1C9A6C; }}
             QPushButton#exportbtn:pressed {{ background: #178257; }}
             QPushButton#selallbtn {{
                 background: {t['accent']}; border: none;
                 border-radius: 11px; color: #FFFFFF;
-                font-size: 12px; font-weight: 700;
+                font-size: 12px; font-weight: 500;
             }}
             QPushButton#selallbtn:hover {{ background: {_qss_alpha(t['accent'], 0xDD)}; }}
             QPushButton#datebtn {{

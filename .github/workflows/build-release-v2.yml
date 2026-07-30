@@ -314,7 +314,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mac
-          path: ${{ env.SRC_DIR }}/dist/西瓜todo-*-mac.dmg
+          path: ${{ env.SRC_DIR }}/dist/西瓜todo-*-mac版.dmg
 
   # ========================= 发布到 Releases 下载页 =========================
   release:
@@ -368,4 +368,4 @@ jobs:
           files: |
             dist/西瓜todo-*-Setup.exe
             dist/西瓜todo-*-便携版.exe
-            dist/西瓜todo-*-mac.dmg
+            dist/西瓜todo-*-mac版.dmg

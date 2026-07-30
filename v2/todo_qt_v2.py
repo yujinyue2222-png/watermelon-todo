@@ -21,9 +21,21 @@
   v2.10 (2026-07-29) 修复：macOS 端悬浮窗口鼠标滑过会抢走其他 app 键盘焦点的问题；
                       优化：首页"今日"统计只计入日常待办（排除项目待办）且仅算今天/过期/无日期的；
                       优化：项目待办 tab 顶部统计改为显示该项目"完成/总计"
+  v2.11 (2026-07-30) 新增：首页导出按钮（可按日期区间+完成状态筛选后导出）；
+                      优化：编辑待办窗把循环/提醒折叠进"选截止日期"，按钮更少；
+                      优化：备注加主题色高亮排版；右键菜单新增"编辑备注/展开小步骤"；
+                      优化：项目页"批量导入"改为"添加待办"，支持批量粘贴或单个填写
+  v2.12 (2026-07-30) 优化：批量添加改用"内容|优先级|日期|备注"竖线分列语法，
+                      支持单条设优先级/日期(07-31/明天/周五等)、实时解析预览、
+                      同项目同名待办自动去重、Tab切换焦点、精简弹窗标题
+  v2.13 (2026-07-30) 优化：添加待办弹窗改 Tab 分页(批量/单个数据隔离不丢失)；
+                      项目名改二选一(下拉选已有 / ➕新建才展开输入框)；
+                      记忆上次分类/紧急度；重复检测升级为三选一弹窗(继续/跳过/取消)；
+                      支持从 Excel 直接粘贴(Tab 分列自动映射)
+                      修复：去掉导出/管理项目/编辑待办弹窗内与标题栏重复的大标题
 """
 
-APP_VERSION = "2.10"
+APP_VERSION = "2.13"
 # 检查更新用：GitHub 仓库最新 Release 接口 + 下载页地址
 UPDATE_API = "https://api.github.com/repos/yujinyue2222-png/watermelon-todo/releases/latest"
 RELEASE_PAGE = "https://github.com/yujinyue2222-png/watermelon-todo/releases/latest"
@@ -434,22 +446,29 @@ class Store:
         n = 0
         base_ts = int(datetime.datetime.now().timestamp() * 1000)
         now_iso = datetime.datetime.now().isoformat(timespec="seconds")
+        # 已存在的（项目, 待办内容）集合，用于重复检测
+        existing = {
+            (t.get("project", ""), (t.get("text", "") or "").strip())
+            for t in self.tasks
+        }
         for i, raw in enumerate(lines):
-            cleaned = raw.strip()
-            if not cleaned:
+            parsed = self._parse_batch_line(raw)
+            if not parsed:
                 continue
-            # 去掉常见的项目符号前缀（- * • 1. 1、 等）
-            cleaned = self._strip_bullet(cleaned)
-            text, note = self._split_batch_note(cleaned)
-            if not text:
-                continue
-            tid = str(base_ts+ i)
+            text = parsed["text"]
+            key = (project, text)
+            if key in existing:
+                continue  # 同项目内同名待办跳过
+            existing.add(key)
+            tid = str(base_ts + i)
             self.tasks.append({
                 "id": tid, "text": text, "status": "todo",
-                "category": category, "due": "", "priority": priority,
+                "category": category,
+                "due": parsed["due"],
+                "priority": parsed["priority"] or priority,
                 "recur": "不循环", "recur_end": "", "subtasks": [],
                 "remind": "到期当天", "remind_log": [],
-                "note": note, "project": project,
+                "note": parsed["note"], "project": project,
                 "created": now_iso, "notified": False,
             })
             n += 1
@@ -471,6 +490,97 @@ class Store:
         """剥离行首常见的列表符号：- * • ·  以及  1.  1、  (1)  等编号"""
         import re
         return re.sub(r"^\s*(?:[-*•·]|\(?\d+[\.\)、])\s*", "", text).strip()
+
+    @staticmethod
+    def _norm_batch_date(token: str) -> str:
+        """把日期片段归一化成 YYYY-MM-DD；无法识别返回空串。
+
+        支持：2026-07-31 / 07-31 / 07/31 / 明天 / 后天 / 今天 /
+        本周五 / 周五 / 下周一 等。
+        """
+        import re
+        s = (token or "").strip()
+        if not s:
+            return ""
+        today = datetime.date.today()
+        # 相对词
+        rel = {"今天": 0, "今日": 0, "明天": 1, "明日": 1, "后天": 2, "大后天": 3}
+        if s in rel:
+            return (today + datetime.timedelta(days=rel[s])).isoformat()
+        # 周几：周一~周日 / 星期x / 下周x
+        wk = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5,
+              "日": 6, "天": 6}
+        m = re.match(r"^(下)?(?:周|星期|礼拜)([一二三四五六日天])$", s)
+        if m:
+            target = wk[m.group(2)]
+            delta = (target - today.weekday()) % 7
+            if m.group(1):  # 下周
+                delta += 7
+            elif delta == 0:  # 本周同一天且就是今天 -> 取今天
+                delta = 0
+            return (today + datetime.timedelta(days=delta)).isoformat()
+        # 完整日期 YYYY-MM-DD 或 YYYY/MM/DD
+        m = re.match(r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$", s)
+        if m:
+            try:
+                return datetime.date(
+                    int(m.group(1)), int(m.group(2)), int(m.group(3))
+                ).isoformat()
+            except ValueError:
+                return ""
+        # 简写 MM-DD 或 MM/DD -> 补当前年份
+        m = re.match(r"^(\d{1,2})[-/](\d{1,2})$", s)
+        if m:
+            try:
+                return datetime.date(
+                    today.year, int(m.group(1)), int(m.group(2))
+                ).isoformat()
+            except ValueError:
+                return ""
+        return ""
+
+    @classmethod
+    def _parse_batch_line(cls, raw: str):
+        """解析批量粘贴的一行，返回 dict 或 None（空行）。
+
+        竖线分列：内容 | 优先级 | 日期 | 备注
+        - 第1列＝内容（必填）
+        - 第2列＝智能识别：是优先级词则为优先级，否则视为备注
+        - 第3列＝日期（可识别才生效，否则并入备注）
+        - 第4列及之后＝备注（多列用空格拼回）
+
+        兼容老习惯：``内容 | 备注`` 里第2列不是优先级词时仍当备注。
+        """
+        cleaned = (raw or "").strip()
+        if not cleaned:
+            return None
+        cleaned = cls._strip_bullet(cleaned)
+        if not cleaned:
+            return None
+        # 统一全角竖线/Tab 为半角竖线后分列
+        norm = cleaned.replace("｜", "|").replace("\t", "|")
+        parts = [p.strip() for p in norm.split("|")]
+        text = parts[0].strip()
+        if not text:
+            return None
+        priority = ""
+        due = ""
+        note = ""
+        rest = parts[1:]
+        # 第2列：优先级词判定
+        if rest and rest[0] in PRIORITIES:
+            priority = rest[0]
+            rest = rest[1:]
+        # 下一列：日期判定
+        if rest:
+            d = cls._norm_batch_date(rest[0])
+            if d:
+                due = d
+                rest = rest[1:]
+        # 剩余列拼成备注
+        if rest:
+            note = " ".join(p for p in rest if p).strip()
+        return {"text": text, "priority": priority, "due": due, "note": note}
 
     def projects(self):
         """返回当前所有项目名（去重、按出现顺序）"""
@@ -1129,13 +1239,16 @@ class TaskCard(QFrame):
         lay.addLayout(mid, 1)
 
         # 编辑按钮（悬浮显示，唯一保留在卡片上的按钮）
+        # 用透明度控制显隐而非 setVisible，避免布局宽度突变导致卡片内容“跳动”
         self.edit_btn = QPushButton("✏️")
         self.edit_btn.setObjectName("edit")
         self.edit_btn.setFixedSize(27, 27)
         self.edit_btn.setToolTip("编辑待办")
         self.edit_btn.setCursor(Qt.PointingHandCursor)
         self.edit_btn.clicked.connect(lambda: self.edited.emit(self.task["id"]))
-        self.edit_btn.setVisible(False)
+        self._edit_opacity = QGraphicsOpacityEffect(self.edit_btn)
+        self._edit_opacity.setOpacity(0.0)
+        self.edit_btn.setGraphicsEffect(self._edit_opacity)
         lay.addWidget(self.edit_btn, 0, Qt.AlignVCenter)
 
         outer.addWidget(top)
@@ -1185,6 +1298,33 @@ class TaskCard(QFrame):
         self.selected = not self.selected
         self.dot.setText("☑" if self.selected else "☐")
         self.select_toggled.emit(self.task["id"], self.selected)
+
+    def set_selected(self, sel):
+        """原地更新选中态（不重建卡片，避免全选时整表闪烁）"""
+        self.selected = sel
+        if self.select_mode:
+            self.dot.setText("☑" if sel else "☐")
+
+    def set_select_mode(self, mode, selected=False):
+        """原地切换多选模式（不重建卡片，避免进入/退出选择模式时整表闪烁）"""
+        if mode == self.select_mode:
+            # 模式未变，仅同步选中态
+            if mode:
+                self.set_selected(selected)
+            return
+        self.select_mode = mode
+        self.selected = selected
+        # 重新绑定 dot 的点击行为
+        try:
+            self.dot.clicked.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+        if mode:
+            self.dot.setText("☑" if selected else "☐")
+            self.dot.clicked.connect(self._on_select_click)
+        else:
+            self.dot.setText(STATUS_ICON[self.task["status"]])
+            self.dot.clicked.connect(lambda: self.toggled.emit(self.task["id"]))
 
     def refresh_status(self):
         """原地刷新完成状态（不重建卡片，避免整表闪烁）"""
@@ -1248,8 +1388,10 @@ class TaskCard(QFrame):
                 text-decoration: {deco};
             }}
             QLabel#notePreview {{
-                color: {t['sub']}; font-size: 11px; font-weight: 400;
-                padding: 1px 0;
+                color: {c if not done else t['done']}; font-size: 11px; font-weight: 500;
+                background: {_qss_alpha(c, 0x14 if not done else 0x0A)};
+                border-left: 3px solid {_qss_alpha(c, 0xCC if not done else 0x55)};
+                border-radius: 6px; padding: 2px 6px;
             }}
             QLabel#cat {{
                 color: {c if not done else t['done']}; font-size: 11px; font-weight: bold;
@@ -1308,13 +1450,13 @@ class TaskCard(QFrame):
 
     def enterEvent(self, e):
         self._hover = True
-        self.edit_btn.setVisible(True)
+        self._edit_opacity.setOpacity(1.0)
         self._apply_style()
         super().enterEvent(e)
 
     def leaveEvent(self, e):
         self._hover = False
-        self.edit_btn.setVisible(False)
+        self._edit_opacity.setOpacity(0.0)
         self._apply_style()
         super().leaveEvent(e)
 
@@ -1343,10 +1485,20 @@ class TaskCard(QFrame):
         else:
             act_pin = menu.addAction("📌  置顶")
         menu.addSeparator()
+        act_note = menu.addAction("📝  编辑备注")
+        act_subs = None
+        if self.task.get("subtasks"):
+            label = "📂  收起小步骤" if self.sub_panel.isVisible() else "📂  展开小步骤"
+            act_subs = menu.addAction(label)
+        menu.addSeparator()
         act_del = menu.addAction("🗑  删除待办")
         chosen = menu.exec(e.globalPos())
         if chosen == act_pin:
             self.pinned.emit(self.task["id"])
+        elif chosen == act_note:
+            self.edited.emit(self.task["id"])
+        elif act_subs is not None and chosen == act_subs:
+            self._toggle_subs()
         elif chosen == act_del:
             self.deleted.emit(self.task["id"])
 
@@ -2005,7 +2157,7 @@ class TodoWidget(QWidget):
         row2 = QHBoxLayout()
         row2.setContentsMargins(0, 0, 0, 0)
         row2.setSpacing(8)
-        self.btn_import = QPushButton("＋ 批量导入")
+        self.btn_import = QPushButton("＋ 添加待办")
         self.btn_import.setObjectName("secondarybtn")
         self.btn_import.setFixedHeight(36)
         self.btn_import.setCursor(Qt.PointingHandCursor)
@@ -2048,7 +2200,7 @@ class TodoWidget(QWidget):
                 self.active_project = projs[0]
             self.proj_pick.setCurrentText(self.active_project)
         else:
-            self.proj_pick.addItem("（暂无项目，点击批量导入新建）")
+            self.proj_pick.addItem("（暂无项目，点击添加待办新建）")
             self.active_project = ""
         self.proj_pick.blockSignals(False)
 
@@ -2074,12 +2226,8 @@ class TodoWidget(QWidget):
         v = QVBoxLayout(dlg)
         v.setContentsMargins(20, 18, 20, 18)
         v.setSpacing(10)
-        title = QLabel("⚙ 管理项目")
-        title.setStyleSheet(
-            f"color:{self.theme['text']};font-size:16px;font-weight:bold;")
-        v.addWidget(title)
         if not projs:
-            v.addWidget(QLabel("暂无项目，先用「批量导入」新建吧～"))
+            v.addWidget(QLabel("暂无项目，先用「添加待办」新建吧～"))
             bb = QDialogButtonBox(QDialogButtonBox.Ok)
             bb.accepted.connect(dlg.accept)
             v.addWidget(bb)
@@ -2149,71 +2297,171 @@ class TodoWidget(QWidget):
         btn_del.clicked.connect(_do_delete)
         dlg.exec()
 
-    # -- 批量导入 --
+    # -- 添加待办（批量粘贴 / 单个填写，Tab 分页）--
     def _batch_import_dialog(self):
-        """弹窗：粘贴多行文本，自动按换行拆成多条待办，归入一个项目"""
-        from PySide6.QtWidgets import QDialog, QDialogButtonBox
+        """弹窗：Tab 分页「批量粘贴」/「单个填写」，两页数据隔离，归入一个项目。"""
+        from PySide6.QtWidgets import (
+            QDialog, QDialogButtonBox, QTabWidget, QWidget)
         dlg = QDialog(self)
-        dlg.setWindowTitle("批量导入待办")
+        dlg.setWindowTitle("添加待办")
         dlg.setStyleSheet(self._dialog_qss())
-        dlg.setMinimumWidth(360)
+        dlg.setMinimumWidth(380)
         v = QVBoxLayout(dlg)
         v.setContentsMargins(20, 18, 20, 18)
         v.setSpacing(10)
-        title = QLabel("📥 批量导入待办")
-        title.setStyleSheet(
-            f"color:{self.theme['text']};font-size:16px;font-weight:bold;")
-        v.addWidget(title)
 
-        # 项目名：可选已有项目或输入新项目
-        v.addWidget(QLabel("项目名称（本周项目 / 周度名，可新建）"))
-        proj_edit = QLineEdit()
-        proj_edit.setPlaceholderText("例如：2026-W30 本周项目")
+        # 上次表单记忆（分类/紧急度，项目不记）
+        mem = getattr(self, "_add_form_memory", None) or {}
+
+        # ---- 项目名：二选一（下拉选已有 / ➕新建项目）----
+        v.addWidget(QLabel("项目名称"))
+        NEW = "➕ 新建项目…"
         existing = self.store.projects()
-        if self.active_project:
-            proj_edit.setText(self.active_project)
-        elif existing:
-            proj_edit.setText(existing[0])
-        v.addWidget(proj_edit)
-        if existing:
-            pick = QComboBox()
-            pick.addItem("↧ 选择已有项目…")
-            pick.addItems(existing)
-            pick.activated.connect(
-                lambda i: proj_edit.setText(pick.currentText())
-                if i > 0 else None)
-            v.addWidget(pick)
+        proj_pick = QComboBox()
+        proj_pick.addItem(NEW)
+        proj_pick.addItems(existing)
+        proj_new = QLineEdit()
+        proj_new.setPlaceholderText("输入新项目名，例如：2026-W30 本周项目")
 
-        # 分类 / 优先级
+        def _sync_proj():
+            proj_new.setVisible(proj_pick.currentText() == NEW)
+        proj_pick.currentIndexChanged.connect(lambda _=None: _sync_proj())
+        if self.active_project and self.active_project in existing:
+            proj_pick.setCurrentText(self.active_project)
+        elif existing:
+            proj_pick.setCurrentIndex(1)
+        v.addWidget(proj_pick)
+        v.addWidget(proj_new)
+        _sync_proj()
+
+        # ---- 分类 / 优先级（带记忆回填）----
         row = QHBoxLayout(); row.setSpacing(10)
         cbox = QVBoxLayout(); cbox.setSpacing(4)
         cbox.addWidget(QLabel("分类"))
         cat = QComboBox(); cat.addItems(self.categories)
+        if mem.get("category") in self.categories:
+            cat.setCurrentText(mem["category"])
         cbox.addWidget(cat); row.addLayout(cbox, 1)
         pbox = QVBoxLayout(); pbox.setSpacing(4)
         pbox.addWidget(QLabel("紧急程度"))
-        pr = QComboBox(); pr.addItems(PRIORITIES); pr.setCurrentText("普通")
+        pr = QComboBox(); pr.addItems(PRIORITIES)
+        pr.setCurrentText(mem["priority"]
+                          if mem.get("priority") in PRIORITIES else "普通")
         pbox.addWidget(pr); row.addLayout(pbox, 1)
         v.addLayout(row)
 
-        v.addWidget(QLabel("待办内容（每行一条，可在竖线后填写备注）"))
+        # ---- Tab 分页 ----
+        tabs = QTabWidget()
+        page_batch = QWidget(); pb = QVBoxLayout(page_batch)
+        pb.setContentsMargins(0, 8, 0, 0); pb.setSpacing(8)
+        page_single = QWidget(); ps = QVBoxLayout(page_single)
+        ps.setContentsMargins(0, 8, 0, 0); ps.setSpacing(8)
+
+        # 批量粘贴页
         te = QTextEdit()
         te.setPlaceholderText(
-            "在这里粘贴，一行一个待办：\n"
-            "完成周报 | 补充本周关键数据\n"
-            "对齐需求 | 和产品经理确认范围\n"
-            "评审设计稿")
-        te.setMinimumHeight(180)
-        v.addWidget(te)
+            "示例：\n"
+            "【P1】完成周报｜08-05｜补充关键数据\n"
+            "对齐需求｜明天\n"
+            "评审设计稿\n"
+            "每行一条待办，竖线分隔：内容｜优先级｜日期｜备注")
+        te.setMinimumHeight(150)
+        te.setTabChangesFocus(True)
+        pb.addWidget(te)
         hint = QLabel(
-            "格式：待办内容 | 备注（备注可不填，也支持全角｜或 Tab 分隔）"
-        )
+            "格式：内容 | 优先级 | 日期 | 备注（后三项都可省略）\n"
+            "· 优先级：" + " / ".join(PRIORITIES) + "\n"
+            "· 日期：08-05、2026-08-05、明天、周五 等\n"
+            "· 第2列不是优先级词时当备注；支持从 Excel 直接粘贴（Tab 分列）")
         hint.setWordWrap(True)
         hint.setStyleSheet(f"color:{self.theme['sub']};font-weight:normal;")
-        v.addWidget(hint)
+        pb.addWidget(hint)
+        pb.addWidget(QLabel("解析预览"))
+        preview = QTextEdit()
+        preview.setReadOnly(True)
+        preview.setFixedHeight(96)
+        preview.setStyleSheet(
+            f"QTextEdit{{border:1px dashed {_qss_alpha(self.theme['accent'], 0x66)};"
+            f"border-radius:8px;background:{_qss_alpha(self.theme['accent'], 0x10)};"
+            f"color:{self.theme['sub']};padding:6px;font-size:12px;}}")
+        pb.addWidget(preview)
+
+        def _refresh_preview():
+            default_pr = pr.currentText()
+            rows = []; ok = 0
+            for raw in te.toPlainText().splitlines():
+                if not raw.strip():
+                    continue
+                p = self.store._parse_batch_line(raw)
+                if not p:
+                    continue
+                ok += 1
+                seg = [p["text"], p["priority"] or default_pr + "(默认)"]
+                if p["due"]:
+                    seg.append("📅" + p["due"])
+                if p["note"]:
+                    seg.append("📝" + p["note"])
+                rows.append("· " + "　".join(seg))
+            if ok:
+                preview.setPlainText(f"共 {ok} 条：\n" + "\n".join(rows))
+            else:
+                preview.setPlainText("（在上方输入后这里显示解析结果）")
+        te.textChanged.connect(_refresh_preview)
+        pr.currentTextChanged.connect(lambda _=None: _refresh_preview())
+        _refresh_preview()
+
+        # 单个填写页
+        ps.addWidget(QLabel("待办内容"))
+        single_text = QLineEdit()
+        single_text.setPlaceholderText("这条待办要做什么？")
+        ps.addWidget(single_text)
+        # 截止日期（循环/提醒/循环截止折叠其中，与编辑待办一致）
+        ps.addWidget(QLabel("截止日期"))
+        _single_due = {"val": ""}
+        _single_recur = {"val": "不循环"}
+        _single_remind = {"val": "到期当天"}
+        _single_rend = {"val": ""}
+        srow = QHBoxLayout(); srow.setSpacing(8)
+        btn_single_due = QPushButton("📅  点击选择日期")
+        btn_single_due.setCursor(Qt.PointingHandCursor)
+        def _pick_single_due():
+            prev = self._pending_due
+            self._pending_due = _single_due["val"]
+            self._pick_due(recur_state=_single_recur, remind_state=_single_remind,
+                           recur_end_state=_single_rend)
+            _single_due["val"] = self._pending_due
+            self._pending_due = prev
+            btn_single_due.setText(
+                f"📅  {_single_due['val']}" if _single_due["val"] else "📅  点击选择日期")
+        btn_single_due.clicked.connect(_pick_single_due)
+        srow.addWidget(btn_single_due, 1)
+        btn_single_due_clear = QPushButton("清除")
+        btn_single_due_clear.setCursor(Qt.PointingHandCursor)
+        def _clear_single_due():
+            _single_due["val"] = ""
+            btn_single_due.setText("📅  点击选择日期")
+        btn_single_due_clear.clicked.connect(_clear_single_due)
+        srow.addWidget(btn_single_due_clear)
+        ps.addLayout(srow)
+        ps.addWidget(QLabel("备注（可选）"))
+        single_note = QTextEdit()
+        single_note.setPlaceholderText("记录进行中的注意事项…")
+        single_note.setFixedHeight(90)
+        single_note.setStyleSheet(
+            f"QTextEdit{{border:1px solid {_qss_alpha(self.theme['accent'], 0x66)};"
+            f"border-left:3px solid {self.theme['accent']};border-radius:8px;"
+            f"background:{_qss_alpha(self.theme['accent'], 0x18)};"
+            f"color:{self.theme['text']};padding:6px;}}")
+        ps.addWidget(single_note)
+        ps.addStretch(1)
+
+        tabs.addTab(page_batch, "📥 批量粘贴")
+        tabs.addTab(page_single, "✏️ 单个填写")
+        tabs.setCurrentIndex(0)
+        v.addWidget(tabs)
 
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        bb.button(QDialogButtonBox.Ok).setText("导入")
+        bb.button(QDialogButtonBox.Ok).setText("添加")
         bb.button(QDialogButtonBox.Cancel).setText("取消")
         bb.accepted.connect(dlg.accept)
         bb.rejected.connect(dlg.reject)
@@ -2221,24 +2469,168 @@ class TodoWidget(QWidget):
 
         if dlg.exec() != QDialog.Accepted:
             return
-        project = proj_edit.text().strip()
+        if proj_pick.currentText() == NEW:
+            project = proj_new.text().strip()
+        else:
+            project = proj_pick.currentText().strip()
         if not project:
-            self._show_toast("请填写项目名称")
+            self._show_toast("请填写或选择项目名称")
             return
-        lines = te.toPlainText().splitlines()
-        n = self.store.add_batch(lines, project=project,
-                                 category=cat.currentText(),
-                                 priority=pr.currentText())
+
+        is_batch = (tabs.currentIndex() == 0)
+        if is_batch:
+            lines = te.toPlainText().splitlines()
+            parsed = [p for p in (self.store._parse_batch_line(ln)
+                                  for ln in lines) if p]
+            if not parsed:
+                self._show_toast("没有可导入的内容")
+                return
+            exist_names = {
+                (t.get("text", "") or "").strip()
+                for t in self.store.tasks
+                if t.get("project", "") == project
+            }
+            dup = [p for p in parsed if p["text"] in exist_names]
+            skip_dup = False
+            if dup:
+                choice = self._dup_confirm_dialog(len(dup))
+                if choice == "cancel":
+                    return
+                skip_dup = (choice == "skip")
+            feed = ([p for p in parsed if p["text"] not in exist_names]
+                    if skip_dup else parsed)
+            rebuilt = []
+            for p in feed:
+                cols = [p["text"]]
+                if p["priority"]:
+                    cols.append(p["priority"])
+                if p["due"]:
+                    cols.append(p["due"])
+                if p["note"]:
+                    cols.append(p["note"])
+                rebuilt.append(" | ".join(cols))
+            n = self.store.add_batch(rebuilt, project=project,
+                                     category=cat.currentText(),
+                                     priority=pr.currentText())
+            skipped = (len(parsed) - len(feed)) if skip_dup else 0
+        else:
+            txt = single_text.text().strip()
+            if not txt:
+                self._show_toast("请填写待办内容")
+                return
+            self.store.add(txt, category=cat.currentText(),
+                           due=_single_due["val"],
+                           priority=pr.currentText(),
+                           recur=_single_recur["val"],
+                           recur_end=_single_rend["val"],
+                           remind=_single_remind["val"],
+                           note=single_note.toPlainText().strip(),
+                           project=project)
+            n = 1; skipped = 0
         if n == 0:
-            self._show_toast("没有可导入的内容")
+            self._show_toast("没有新增内容")
             return
+        self._add_form_memory = {
+            "category": cat.currentText(),
+            "priority": pr.currentText(),
+        }
         self.active_project = project
         self.view_mode = "project"
         for k, b in self.tab_btns.items():
             b.setChecked(k == "project")
         self._apply_view_mode()
         self.refresh()
-        self._show_toast(f"已导入 {n} 条到「{project}」")
+        msg = f"已添加 {n} 条到「{project}」"
+        if skipped:
+            msg += f"，跳过 {skipped} 条重复"
+        self._show_toast(msg)
+
+    def _dup_confirm_dialog(self, count):
+        """检测到疑似重复时的三选一弹窗，返回 'add'/'skip'/'cancel'。"""
+        from PySide6.QtWidgets import QDialog
+        dlg = QDialog(self)
+        dlg.setWindowTitle("检测到重复")
+        dlg.setStyleSheet(self._dialog_qss())
+        dlg.setMinimumWidth(300)
+        v = QVBoxLayout(dlg)
+        v.setContentsMargins(20, 18, 20, 18); v.setSpacing(12)
+        lbl = QLabel(f"检测到 {count} 条与现有待办同名，如何处理？")
+        lbl.setWordWrap(True)
+        lbl.setStyleSheet(f"color:{self.theme['text']};")
+        v.addWidget(lbl)
+        result = {"v": "cancel"}
+        rowb = QHBoxLayout(); rowb.setSpacing(8)
+        b_skip = QPushButton("跳过重复")
+        b_add = QPushButton("继续新增")
+        b_cancel = QPushButton("取消")
+        for b in (b_skip, b_add, b_cancel):
+            b.setCursor(Qt.PointingHandCursor)
+        def _pick(val):
+            result["v"] = val; dlg.accept()
+        b_skip.clicked.connect(lambda: _pick("skip"))
+        b_add.clicked.connect(lambda: _pick("add"))
+        b_cancel.clicked.connect(lambda: _pick("cancel"))
+        rowb.addWidget(b_skip, 1); rowb.addWidget(b_add, 1)
+        rowb.addWidget(b_cancel, 1)
+        v.addLayout(rowb)
+        dlg.exec()
+        return result["v"]
+
+    # -- 通用导出：把一批任务写入 CSV / TXT --
+    def _task_export_date(self, t):
+        """取任务用于日期区间过滤的日期(YYYY-MM-DD)：
+        优先截止日期(due)，未填则回退创建当日(created)。"""
+        due = (t.get("due", "") or "").strip()
+        if due:
+            return due[:10]
+        created = (t.get("created", "") or "").strip()
+        return created[:10] if created else ""
+
+    def _write_tasks_export(self, path, items, header_lines=None,
+                            with_project_col=False):
+        """把任务列表写入文件（CSV 或 TXT），返回是否成功。
+
+        header_lines: TXT 顶部说明行列表；CSV 时忽略。
+        with_project_col: CSV 是否额外输出「项目」列。
+        """
+        try:
+            is_csv = path.lower().endswith(".csv")
+            with open(path, "w", encoding="utf-8-sig", newline="") as f:
+                if is_csv:
+                    import csv
+                    w = csv.writer(f)
+                    cols = ["状态", "待办内容", "分类", "优先级", "截止", "备注"]
+                    if with_project_col:
+                        cols = ["项目"] + cols
+                    w.writerow(cols)
+                    for t in items:
+                        row = [
+                            "已完成" if t.get("status") == "done" else "未完成",
+                            t.get("text", ""), t.get("category", ""),
+                            t.get("priority", ""), t.get("due", ""),
+                            t.get("note", "").replace("\n", " "),
+                        ]
+                        if with_project_col:
+                            row = [t.get("project", "")] + row
+                        w.writerow(row)
+                else:
+                    for hl in (header_lines or []):
+                        f.write(hl + "\n")
+                    if header_lines:
+                        f.write("=" * 30 + "\n")
+                    for t in items:
+                        mark = "[✓]" if t.get("status") == "done" else "[ ]"
+                        line = f"{mark} {t.get('text', '')}"
+                        if t.get("due"):
+                            line += f"  (截止 {t.get('due')})"
+                        f.write(line + "\n")
+                        if t.get("note"):
+                            f.write(f"    备注：{t.get('note')}\n")
+            self._show_toast(f"已导出：{os.path.basename(path)}")
+            return True
+        except Exception as ex:
+            self._show_toast(f"导出失败：{ex}")
+            return False
 
     # -- 导出当前项目 --
     def _export_project(self):
@@ -2260,39 +2652,87 @@ class TodoWidget(QWidget):
             "CSV 文件 (*.csv);;文本文件 (*.txt)")
         if not path:
             return
-        try:
-            is_csv = path.lower().endswith(".csv")
-            with open(path, "w", encoding="utf-8-sig", newline="") as f:
-                if is_csv:
-                    import csv
-                    w = csv.writer(f)
-                    w.writerow(["项目", "状态", "待办内容", "分类",
-                                "优先级", "截止", "备注"])
-                    for t in items:
-                        w.writerow([
-                            self.active_project,
-                            "已完成" if t.get("status") == "done" else "未完成",
-                            t.get("text", ""), t.get("category", ""),
-                            t.get("priority", ""), t.get("due", ""),
-                            t.get("note", "").replace("\n", " "),
-                        ])
-                    w.writerow([])
-                    w.writerow(["汇总", f"{done}/{total} 完成", "", "", "", "", ""])
-                else:
-                    f.write(f"项目：{self.active_project}\n")
-                    f.write(f"完成情况：{done}/{total}\n")
-                    f.write("=" * 30 + "\n")
-                    for t in items:
-                        mark = "[✓]" if t.get("status") == "done" else "[ ]"
-                        line = f"{mark} {t.get('text', '')}"
-                        if t.get("due"):
-                            line += f"  (截止 {t.get('due')})"
-                        f.write(line + "\n")
-                        if t.get("note"):
-                            f.write(f"    备注：{t.get('note')}\n")
-            self._show_toast(f"已导出：{os.path.basename(path)}")
-        except Exception as ex:
-            self._show_toast(f"导出失败：{ex}")
+        header = [f"项目：{self.active_project}", f"完成情况：{done}/{total}"]
+        self._write_tasks_export(path, items, header_lines=header)
+
+    # -- 导出首页待办（按日期区间 + 完成状态筛选）--
+    def _export_daily_dialog(self):
+        from PySide6.QtWidgets import QDialog, QDialogButtonBox
+        from PySide6.QtCore import QDate
+        dlg = QDialog(self)
+        dlg.setWindowTitle("导出待办")
+        dlg.setStyleSheet(self._dialog_qss())
+        dlg.setMinimumWidth(340)
+        v = QVBoxLayout(dlg)
+        v.setContentsMargins(20, 18, 20, 18)
+        v.setSpacing(10)
+        hint = QLabel("按日期区间与完成状态筛选后导出（无截止日期的按创建当日计算）")
+        hint.setWordWrap(True)
+        hint.setStyleSheet(f"color:{self.theme['sub']};font-weight:normal;")
+        v.addWidget(hint)
+        # 日期区间：开始 / 结束（复用日历弹窗）
+        _range = {"from": "", "to": ""}
+        v.addWidget(QLabel("日期区间（可留空表示不限）"))
+        drow = QHBoxLayout(); drow.setSpacing(8)
+        btn_from = QPushButton("📅  开始日期")
+        btn_to = QPushButton("📅  结束日期")
+        for b in (btn_from, btn_to):
+            b.setCursor(Qt.PointingHandCursor)
+
+        def _pick_range(key, btn, label):
+            prev = self._pending_due
+            self._pending_due = _range[key]
+            self._pick_due()
+            _range[key] = (self._pending_due or "")[:10]
+            self._pending_due = prev
+            btn.setText(f"📅  {_range[key]}" if _range[key] else f"📅  {label}")
+        btn_from.clicked.connect(lambda: _pick_range("from", btn_from, "开始日期"))
+        btn_to.clicked.connect(lambda: _pick_range("to", btn_to, "结束日期"))
+        drow.addWidget(btn_from, 1); drow.addWidget(btn_to, 1)
+        v.addLayout(drow)
+        # 完成状态
+        v.addWidget(QLabel("完成状态"))
+        st = QComboBox(); st.addItems(["全部", "仅未完成", "仅已完成"])
+        v.addWidget(st)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.button(QDialogButtonBox.Ok).setText("导出")
+        bb.button(QDialogButtonBox.Cancel).setText("取消")
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        v.addWidget(bb)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        d_from, d_to = _range["from"], _range["to"]
+        want = st.currentText()
+        # 仅导出首页待办（非项目任务）
+        items = [t for t in self.store.tasks if not t.get("project", "")]
+        picked = []
+        for t in items:
+            if want == "仅未完成" and t.get("status") == "done":
+                continue
+            if want == "仅已完成" and t.get("status") != "done":
+                continue
+            d = self._task_export_date(t)
+            if d_from and (not d or d < d_from):
+                continue
+            if d_to and (not d or d > d_to):
+                continue
+            picked.append(t)
+        if not picked:
+            self._show_toast("没有符合条件的待办")
+            return
+        picked = sorted(picked, key=lambda t: (t.get("status") == "done",
+                                               self._task_export_date(t)))
+        rng = f"{d_from or '不限'} ~ {d_to or '不限'}"
+        default_name = "待办导出.csv"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "导出待办", default_name,
+            "CSV 文件 (*.csv);;文本文件 (*.txt)")
+        if not path:
+            return
+        header = [f"导出范围：{rng}", f"完成状态：{want}",
+                  f"共 {len(picked)} 条"]
+        self._write_tasks_export(path, picked, header_lines=header)
 
 
     def _build_input(self):
@@ -2547,20 +2987,24 @@ class TodoWidget(QWidget):
         outer = QHBoxLayout(self.catbar_widget)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(6)
+        # 左右整体垂直居中对齐，避免出现滚动条时标签与右侧按钮错位
+        outer.setAlignment(Qt.AlignVCenter)
 
         # ---- 左：横向可滚动的分类标签 ----
         self.cat_scroll = QScrollArea()
         self.cat_scroll.setObjectName("catscroll")
         self.cat_scroll.setWidgetResizable(True)
         self.cat_scroll.setFrameShape(QFrame.NoFrame)
-        self.cat_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.cat_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.cat_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.cat_scroll.setFixedHeight(38)
+        self.cat_scroll.setFixedHeight(30)
         self.cat_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         chips_holder = QWidget()
         self.catbar = QHBoxLayout(chips_holder)
         self.catbar.setContentsMargins(0, 0, 0, 0)
         self.catbar.setSpacing(6)
+        # 标签在容器内垂直居中，避免与右侧按钮高度错位
+        self.catbar.setAlignment(Qt.AlignVCenter)
         self.cat_btns = {}
         for name in ["全部"] + self.categories:
             b = QPushButton(name)
@@ -2569,11 +3013,13 @@ class TodoWidget(QWidget):
             b.setCursor(Qt.PointingHandCursor)
             b.setChecked(name == self.active_cat)
             b.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+            b.setFixedHeight(28)
             b.clicked.connect(lambda _=False, n=name: self._set_cat(n))
             self.cat_btns[name] = b
             self.catbar.addWidget(b)
         self.btn_new_cat = QPushButton("＋ 标签")
         self.btn_new_cat.setObjectName("chip")
+        self.btn_new_cat.setFixedHeight(28)
         self.btn_new_cat.setCursor(Qt.PointingHandCursor)
         self.btn_new_cat.setToolTip("新建标签")
         self.btn_new_cat.clicked.connect(self._create_category_from_bar)
@@ -2584,17 +3030,27 @@ class TodoWidget(QWidget):
         self.cat_scroll.installEventFilter(self)
         outer.addWidget(self.cat_scroll, 1)
 
-        # ---- 右：固定的多选 / 全选按钮 ----
+        # ---- 右：固定的导出 / 多选 / 全选按钮 ----
+        self.btn_daily_export = QPushButton("导出")
+        self.btn_daily_export.setObjectName("chip")
+        self.btn_daily_export.setCursor(Qt.PointingHandCursor)
+        self.btn_daily_export.setToolTip("导出待办（按日期区间/完成状态）")
+        self.btn_daily_export.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.btn_daily_export.setFixedHeight(28)
+        self.btn_daily_export.clicked.connect(self._export_daily_dialog)
+        outer.addWidget(self.btn_daily_export)
         self.btn_multi = QPushButton("☑")
         self.btn_multi.setObjectName("chip")
         self.btn_multi.setCursor(Qt.PointingHandCursor)
         self.btn_multi.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.btn_multi.setFixedHeight(28)
         self.btn_multi.clicked.connect(self._toggle_select_mode)
         outer.addWidget(self.btn_multi)
         self.btn_sel_all = QPushButton("全选")
         self.btn_sel_all.setObjectName("chip")
         self.btn_sel_all.setCursor(Qt.PointingHandCursor)
         self.btn_sel_all.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.btn_sel_all.setFixedHeight(28)
         self.btn_sel_all.clicked.connect(self._batch_select_all)
         self.btn_sel_all.setVisible(False)
         outer.addWidget(self.btn_sel_all)
@@ -2652,7 +3108,14 @@ class TodoWidget(QWidget):
             "取消" if self.select_mode else "多选"
         )
         self._update_batch_lbl()
-        self.refresh()
+        # 原地切换每张卡片的选择模式，避免重建整表导致闪烁
+        for i in range(self.list_lay.count()):
+            w = self.list_lay.itemAt(i).widget()
+            if isinstance(w, TaskCard):
+                w.set_select_mode(
+                    self.select_mode,
+                    selected=w.task["id"] in self.selected_ids,
+                )
 
     def _on_card_select(self, tid, checked):
         if checked:
@@ -2688,7 +3151,11 @@ class TodoWidget(QWidget):
         else:
             self.selected_ids.update(vis)
         self._update_batch_lbl()
-        self.refresh()
+        # 原地更新每张卡片的选中态，避免重建整表导致闪烁
+        for i in range(self.list_lay.count()):
+            w = self.list_lay.itemAt(i).widget()
+            if isinstance(w, TaskCard):
+                w.set_selected(w.task["id"] in self.selected_ids)
 
     def _batch_done(self):
         for tid in list(self.selected_ids):
@@ -3233,7 +3700,7 @@ class TodoWidget(QWidget):
         self.cat_btns[name] = b
         self.catbar.insertWidget(self.catbar.indexOf(self.btn_new_cat), b)
 
-    def _pick_due(self, recur_state=None, remind_state=None):
+    def _pick_due(self, recur_state=None, remind_state=None, recur_end_state=None):
         """弹出日历选择截止时间，并可选精确到时间点。
 
         recur_state: 可选 dict，形如 {"val": "不循环"}。传入时弹窗底部
@@ -3245,7 +3712,7 @@ class TodoWidget(QWidget):
         from PySide6.QtWidgets import (QDialog, QVBoxLayout,
                                        QDialogButtonBox, QHBoxLayout, QPushButton,
                                        QCheckBox, QTimeEdit, QFrame, QLabel,
-                                       QComboBox, QAbstractSpinBox)
+                                       QComboBox, QAbstractSpinBox, QDateEdit)
         from PySide6.QtCore import QDate, QLocale, QTime
         from PySide6.QtGui import QTextCharFormat, QColor
         dlg = QDialog(self)
@@ -3360,11 +3827,14 @@ class TodoWidget(QWidget):
 
         # 循环设置行（仅在传入 recur_state 时显示；把「是否循环」合并进日期弹窗）
         recur_pick = None
+        recur_end_pick = None
         if recur_state is not None:
             recur_card = QFrame()
             recur_card.setObjectName("timeCard")
-            rrow = QHBoxLayout(recur_card)
-            rrow.setContentsMargins(12, 9, 12, 9)
+            recur_col = QVBoxLayout(recur_card)
+            recur_col.setContentsMargins(12, 9, 12, 9)
+            recur_col.setSpacing(8)
+            rrow = QHBoxLayout()
             rrow.setSpacing(10)
             rrow.addWidget(QLabel("循环重复"))
             rrow.addStretch()
@@ -3374,6 +3844,43 @@ class TodoWidget(QWidget):
             recur_pick.setCurrentText(recur_state.get("val") or "不循环")
             recur_pick.setMinimumWidth(120)
             rrow.addWidget(recur_pick)
+            recur_col.addLayout(rrow)
+            # 循环截止日期（仅当选择了循环时才可用，合并进日期弹窗）
+            if recur_end_state is not None:
+                erow = QHBoxLayout()
+                erow.setSpacing(10)
+                erow.addWidget(QLabel("循环截止"))
+                erow.addStretch()
+                recur_end_pick = QDateEdit()
+                recur_end_pick.setObjectName("timeEdit")
+                recur_end_pick.setCalendarPopup(True)
+                recur_end_pick.setDisplayFormat("yyyy-MM-dd")
+                recur_end_pick.setMinimumWidth(140)
+                _ev = recur_end_state.get("val") or ""
+                if _ev:
+                    _ed = QDate.fromString(_ev[:10], "yyyy-MM-dd")
+                    if _ed.isValid():
+                        recur_end_pick.setDate(_ed)
+                    else:
+                        recur_end_pick.setDate(QDate.currentDate())
+                else:
+                    recur_end_pick.setDate(QDate.currentDate())
+                erow.addWidget(recur_end_pick)
+                chk_recur_end = QCheckBox("设置循环结束日期")
+                chk_recur_end.setChecked(bool(_ev))
+                recur_end_pick.setEnabled(bool(_ev))
+                chk_recur_end.toggled.connect(recur_end_pick.setEnabled)
+                def _sync_recur_end_vis(txt=None):
+                    on = recur_pick.currentText() != "不循环"
+                    chk_recur_end.setVisible(on)
+                    recur_end_pick.setVisible(on)
+                recur_pick.currentTextChanged.connect(_sync_recur_end_vis)
+                _sync_recur_end_vis()
+                erow2 = QHBoxLayout()
+                erow2.addWidget(chk_recur_end)
+                erow2.addStretch()
+                recur_col.addLayout(erow2)
+                recur_col.addLayout(erow)
             v.addWidget(recur_card)
 
         # 提醒时间行（仅在传入 remind_state 时显示；把「提醒」合并进日期弹窗）
@@ -3416,6 +3923,15 @@ class TodoWidget(QWidget):
             self._pending_due = due
             if recur_state is not None and recur_pick is not None:
                 recur_state["val"] = recur_pick.currentText()
+                # 循环截止：不循环或未勾选结束日期时清空
+                if recur_end_state is not None:
+                    if (recur_pick.currentText() != "不循环"
+                            and recur_end_pick is not None
+                     and recur_end_pick.isEnabled()):
+                        recur_end_state["val"] = \
+                            recur_end_pick.date().toString("yyyy-MM-dd")
+                    else:
+                        recur_end_state["val"] = ""
             if remind_state is not None and remind_pick is not None:
                 remind_state["val"] = remind_pick.currentText()
             self._update_date_btn()
@@ -3730,10 +4246,6 @@ class TodoWidget(QWidget):
         v = QVBoxLayout(dlg)
         v.setContentsMargins(20, 18, 20, 18)
         v.setSpacing(10)
-        title = QLabel("✏️ 编辑待办")
-        title.setStyleSheet(
-            f"color:{self.theme['text']};font-size:16px;font-weight:bold;")
-        v.addWidget(title)
         v.addWidget(QLabel("内容"))
         ed = QLineEdit(task["text"])
         ed.setPlaceholderText("这条待办要做什么？")
@@ -3755,17 +4267,21 @@ class TodoWidget(QWidget):
         pbox.addWidget(pr)
         row.addLayout(pbox, 1)
         v.addLayout(row)
-        # 截止日期（日历选择）
+        # 截止日期（日历选择）——循环/提醒折叠其中
         v.addWidget(QLabel("截止日期"))
         drow = QHBoxLayout(); drow.setSpacing(8)
         _edit_due = {"val": task.get("due", "")}
+        _recur_state = {"val": task.get("recur", "不循环")}
+        _remind_state = {"val": task.get("remind", "到期当天")}
+        _recur_end = {"val": task.get("recur_end", "")}
         btn_due = QPushButton(
             f"📅  {_edit_due['val']}" if _edit_due["val"] else "📅  点击选择日期")
         btn_due.setCursor(Qt.PointingHandCursor)
         def _pick_edit_due():
             prev = self._pending_due
             self._pending_due = _edit_due["val"]
-            self._pick_due()
+            self._pick_due(recur_state=_recur_state, remind_state=_remind_state,
+                           recur_end_state=_recur_end)
             _edit_due["val"] = self._pending_due
             self._pending_due = prev
             btn_due.setText(
@@ -3780,54 +4296,18 @@ class TodoWidget(QWidget):
         btn_due_clear.clicked.connect(_clear_edit_due)
         drow.addWidget(btn_due_clear)
         v.addLayout(drow)
-        # 循环设置
-        v.addWidget(QLabel("循环重复"))
-        rrow = QHBoxLayout(); rrow.setSpacing(8)
-        rc = QComboBox()
-        rc.addItems(RECUR_TYPES)
-        rc.setCurrentText(task.get("recur", "不循环"))
-        rrow.addWidget(rc, 1)
-        _recur_end = {"val": task.get("recur_end", "")}
-        btn_rend = QPushButton(
-            f"📅  {_recur_end['val']}" if _recur_end["val"] else "📅  循环截止（可选）")
-        btn_rend.setCursor(Qt.PointingHandCursor)
-        def _pick_recur_end():
-            prev = self._pending_due
-            self._pending_due = _recur_end["val"]
-            self._pick_due()
-            _recur_end["val"] = self._pending_due
-            self._pending_due = prev
-            btn_rend.setText(
-                f"📅  {_recur_end['val']}" if _recur_end["val"] else "📅  循环截止（可选）")
-        btn_rend.clicked.connect(_pick_recur_end)
-        rrow.addWidget(btn_rend, 1)
-        v.addLayout(rrow)
-        # 提醒设置
-        v.addWidget(QLabel("提醒时间"))
-        rmd = QComboBox()
-        rmd.addItems(list(REMIND_TYPES.keys()))
-        rmd.setCurrentText(task.get("remind", "到期当天"))
-        v.addWidget(rmd)
-        # 备注（折叠）——记录进行中的注意事项
-        _note_state = {"open": bool(task.get("note", ""))}
-        note_toggle = QPushButton()
-        note_toggle.setCursor(Qt.PointingHandCursor)
+        # 备注——常驻文本框展示（与添加待办/项目待办一致，不再折叠）
+        v.addWidget(QLabel("备注（可选）"))
         note_edit = QTextEdit()
         note_edit.setPlaceholderText("记录进行中的注意事项…")
         note_edit.setPlainText(task.get("note", ""))
         note_edit.setFixedHeight(70)
-        def _sync_note_toggle():
-            has = bool(note_edit.toPlainText().strip())
-            arrow = "▾" if _note_state["open"] else "▸"
-            note_toggle.setText(f"{arrow}  备注" + ("  📝" if has else ""))
-            note_edit.setVisible(_note_state["open"])
-        def _toggle_note():
-            _note_state["open"] = not _note_state["open"]
-            _sync_note_toggle()
-        note_toggle.clicked.connect(_toggle_note)
-        v.addWidget(note_toggle)
+        note_edit.setStyleSheet(
+            f"QTextEdit{{border:1px solid {_qss_alpha(self.theme['accent'], 0x66)};"
+            f"border-left:3px solid {self.theme['accent']};border-radius:8px;"
+            f"background:{_qss_alpha(self.theme['accent'], 0x18)};"
+            f"color:{self.theme['text']};padding:6px;}}")
         v.addWidget(note_edit)
-        _sync_note_toggle()
         # 小步骤（把大待办拆成几步，可选）——分条式：每步一行，可勾选 / 删除
         v.addWidget(QLabel("小步骤（可选，把这条待办拆成几步）"))
         from PySide6.QtWidgets import QWidget as _QWidget
@@ -3899,9 +4379,9 @@ class TodoWidget(QWidget):
                               category=cat.currentText(),
                               priority=pr.currentText(),
                               due=_edit_due["val"],
-                              recur=rc.currentText(),
+                              recur=_recur_state["val"],
                               recur_end=_recur_end["val"],
-                              remind=rmd.currentText(),
+                              remind=_remind_state["val"],
                               remind_log=[],
                               note=note_edit.toPlainText().strip(),
                               subtasks=subs)

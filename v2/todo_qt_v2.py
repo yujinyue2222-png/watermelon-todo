@@ -359,6 +359,8 @@ THEMES = {
     },
 }
 THEME_ORDER = list(THEMES.keys())
+# 仅内置示例主题（不含运行时 DIY 追加的主题），用作“展示前 8 个例子”的基准
+BUILTIN_THEME_ORDER = list(THEME_ORDER)
 
 CAT_COLORS = {
     "工作": "#4C6FFF", "生活": "#2FA96B",
@@ -1899,8 +1901,8 @@ class ThemeMarketDialog(QDialog):
         inner.setObjectName("inner")
         flow = FlowLayout(inner, margin=6, hspacing=14, vspacing=14)
         self._cards = []
-        # 只展示前 8 个示例主题，但确保当前正在使用的主题始终可见
-        shown = THEME_ORDER[:8]
+        # 只展示前 8 个内置示例主题，但确保当前正在使用的主题始终可见
+        shown = BUILTIN_THEME_ORDER[:8]
         if self.main.theme_name not in shown and self.main.theme_name in THEME_ORDER:
             shown = shown[:-1] + [self.main.theme_name]
         for name in shown:
@@ -5749,7 +5751,11 @@ class TodoWidget(QWidget):
         m = QMenu(self)
         m.addAction("选择主题").setEnabled(False)
         m.addSeparator()
-        for name in THEME_ORDER:
+        # 只展示前 8 个内置示例主题，但确保当前正在使用的主题始终可见
+        shown = BUILTIN_THEME_ORDER[:8]
+        if self.theme_name not in shown and self.theme_name in THEME_ORDER:
+            shown = shown[:-1] + [self.theme_name]
+        for name in shown:
             act = m.addAction(("● " if name == self.theme_name else "○ ") + name)
             act.setCheckable(True)
             act.setChecked(name == self.theme_name)

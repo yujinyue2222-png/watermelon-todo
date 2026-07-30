@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# 构建产物
+build/
+dist/
+.venv_build/
+*.spec
+
+# 运行时产生的本地文件
+_crash.log
+*.log
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 运行输出
+run_out.txt
+run_err.txt

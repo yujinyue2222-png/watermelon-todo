@@ -35,7 +35,7 @@
                       修复：去掉导出/管理项目/编辑待办弹窗内与标题栏重复的大标题
 """
 
-APP_VERSION = "2.13"
+APP_VERSION = "3.0"
 # 检查更新用：GitHub 仓库最新 Release 接口 + 下载页地址
 UPDATE_API = "https://api.github.com/repos/yujinyue2222-png/watermelon-todo/releases/latest"
 RELEASE_PAGE = "https://github.com/yujinyue2222-png/watermelon-todo/releases/latest"
@@ -60,7 +60,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QScrollArea, QFrame, QGraphicsDropShadowEffect,
     QComboBox as QtComboBox, QMenu, QSizePolicy, QGraphicsOpacityEffect,
     QLayout, QTextEdit, QFileDialog, QCalendarWidget, QStyle,
-    QStyleOptionComboBox, QSystemTrayIcon,
+    QStyleOptionComboBox, QSystemTrayIcon, QDialog, QDialogButtonBox,
+    QCheckBox, QSpinBox,
 )
 from PySide6.QtCore import (
     Qt, QPoint, QTimer, QPropertyAnimation, QEasingCurve, QRect, QSize, Signal,
@@ -68,7 +69,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QColor, QFont, QPainter, QPainterPath, QBrush, QCursor, QIcon, QFontDatabase,
-    QLinearGradient, QPaintEvent, QPen, QDesktopServices,
+    QLinearGradient, QPaintEvent, QPen, QDesktopServices, QPixmap, QTransform,
 )
 
 # ----------------------------------------------------------------------------
@@ -109,6 +110,72 @@ def _apply_no_steal_focus(widget, accept_focus: bool = True):
                 pass
         if not accept_focus:
             widget.setFocusPolicy(Qt.NoFocus)
+    except Exception:
+        pass
+
+
+def _mac_bring_to_front(widget):
+    """macOS：把窗口提到最前但**绝不**激活本 App（不抢其它 App 焦点）。
+
+    用 NSWindow 的 orderFrontRegardless —— 只调整窗口层级，不会让本 App
+    成为活跃 App，因此不会抢走微信等前台 App 的键盘/输入法焦点。用于让悬浮
+    小西瓜浮在主窗口之上（否则两个置顶窗口中，后激活的主窗口会盖住它）。
+    """
+    if not IS_MAC:
+        return
+    try:
+        from ctypes.util import find_library
+        objc = ctypes.cdll.LoadLibrary(find_library("objc") or "/usr/lib/libobjc.dylib")
+        sr = objc.sel_registerName
+        sr.restype = ctypes.c_void_p
+        sr.argtypes = [ctypes.c_char_p]
+        msg = objc.objc_msgSend
+        msg.restype = ctypes.c_void_p
+        msg.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        view = ctypes.c_void_p(int(widget.winId()))
+        window = ctypes.c_void_p(msg(view, sr(b"window")))
+        if window:
+            msg(window, sr(b"orderFrontRegardless"))
+    except Exception:
+        pass
+
+
+def _mac_make_window_truly_transparent(widget):
+    """macOS：关闭悬浮窗阴影并把背景设为完全透明。
+
+    frameless + WA_TranslucentBackground 的窗口在 macOS 上仍可能被系统加上一层
+    浅色阴影/半透明背景，在浅色桌面下显出“白色重影”。关闭阴影、背景设 clearColor
+    即可消除。仅做属性设置（不改变窗口类型），风险极低；全程 try/except 兜底。
+    """
+    if not IS_MAC:
+        return
+    try:
+        from ctypes.util import find_library
+        objc = ctypes.cdll.LoadLibrary(find_library("objc") or "/usr/lib/libobjc.dylib")
+        sr = objc.sel_registerName
+        sr.restype = ctypes.c_void_p
+        sr.argtypes = [ctypes.c_char_p]
+        msg = objc.objc_msgSend
+        msg.restype = ctypes.c_void_p
+        msg.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        view = ctypes.c_void_p(int(widget.winId()))
+        window = ctypes.c_void_p(msg(view, sr(b"window")))
+        if not window:
+            return
+        # 1) 关闭窗口阴影（drop shadow），浅色桌面下这层光晕最像“白色重影”
+        msg.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
+        msg(window, sr(b"setHasShadow:"), ctypes.c_int(0))
+        # 2) 背景设为完全透明 clearColor
+        objc.objc_getClass.restype = ctypes.c_void_p
+        objc.objc_getClass.argtypes = [ctypes.c_char_p]
+        NSColor = objc.objc_getClass(b"NSColor")
+        if NSColor:
+            msg.restype = ctypes.c_void_p
+            msg.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+            clear = ctypes.c_void_p(msg(NSColor, sr(b"clearColor")))
+            if clear:
+                msg.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+                msg(window, sr(b"setBackgroundColor:"), clear)
     except Exception:
         pass
 
@@ -230,6 +297,65 @@ THEMES = {
         "card_hover": "#DFF3F1", "text": "#173234", "sub": "#6E9896",
         "accent": "#0FB5AE", "accent2": "#3FD0C9", "border": "#CFEAE8",
         "shadow": "#0A4B47", "done": "#A9D3D0",
+    },
+    "深邃蓝": {
+        "bg": "#0E1726F2", "panel": "#152033", "card": "#1B283E",
+        "card_hover": "#233150", "text": "#E6EDF7", "sub": "#7E8DA6",
+        "accent": "#3DA9FC", "accent2": "#6BC0FF", "border": "#27324A",
+        "shadow": "#000000", "done": "#4A5A75",
+    },
+    "薄荷青": {
+        "bg": "#E8F8F4E6", "panel": "#F2FBF8", "card": "#FFFFFF",
+        "card_hover": "#DFF3EE", "text": "#1E3A33", "sub": "#6E9A8E",
+        "accent": "#16BFA0", "accent2": "#3FD8BC", "border": "#CDEAE2",
+        "shadow": "#0A4A3C", "done": "#A5D5CB",
+    },
+    "焦糖棕": {
+        "bg": "#F7EFE6E6", "panel": "#FBF5EE", "card": "#FFFFFF",
+        "card_hover": "#F2E6D8", "text": "#3A2A1E", "sub": "#9C8270",
+        "accent": "#B07B4E", "accent2": "#D29B6B", "border": "#ECDDCD",
+        "shadow": "#5A3A1E", "done": "#D2BCA4",
+    },
+    "玫瑰金": {
+        "bg": "#FCEEEDE6", "panel": "#FEF5F4", "card": "#FFFFFF",
+        "card_hover": "#FBE7E5", "text": "#3E2A2C", "sub": "#B08E92",
+        "accent": "#E08A8E", "accent2": "#F0AEB1", "border": "#F4D9D8",
+        "shadow": "#7A3A42", "done": "#E2BCBE",
+    },
+    "蜜桃汽水": {
+        "bg": "#FFEEE7E6", "panel": "#FFF6F1", "card": "#FFFFFF",
+        "card_hover": "#FFE7DE", "text": "#3D2A24", "sub": "#A07C70",
+        "accent": "#FF7A59", "accent2": "#FFA07E", "border": "#F5DCD0",
+        "shadow": "#7A3A22", "done": "#E0BFB5",
+        "gradient": [(0.0, "#FFD9C2"), (0.38, "#FFB3C6"), (0.7, "#E2C2F5"), (1.0, "#BFE3FF")],
+    },
+    "晚霞": {
+        "bg": "#FFF1E8E6", "panel": "#FFF7F2", "card": "#FFFFFF",
+        "card_hover": "#FCE7DF", "text": "#3A2433", "sub": "#9E7892",
+        "accent": "#F25C7A", "accent2": "#FF8AA5", "border": "#F5D8DE",
+        "shadow": "#7A2A44", "done": "#E0BBC6",
+        "gradient": [(0.0, "#FF9D8B"), (0.4, "#FF6A88"), (0.72, "#FF99AC"), (1.0, "#8E7AE6")],
+    },
+    "极光夜": {
+        "bg": "#0B1220F2", "panel": "#101A2E", "card": "#172238",
+        "card_hover": "#1F2C48", "text": "#E6EEF8", "sub": "#7E8DA6",
+        "accent": "#3FE0C0", "accent2": "#6BE8D0", "border": "#243150",
+        "shadow": "#000000", "done": "#4A5A75",
+        "gradient": [(0.0, "#08182A"), (0.4, "#0E2A3C"), (0.72, "#1A2052"), (1.0, "#2C154A")],
+    },
+    "棉花糖": {
+        "bg": "#FCF0F5E6", "panel": "#FEF6FA", "card": "#FFFFFF",
+        "card_hover": "#FBE7EF", "text": "#3A2740", "sub": "#A988A0",
+        "accent": "#C56AC0", "accent2": "#E094DC", "border": "#F3D9E8",
+        "shadow": "#6A2A5C", "done": "#DDBED2",
+        "gradient": [(0.0, "#FFD1E8"), (0.35, "#D7E4FF"), (0.7, "#D6F5E6"), (1.0, "#EADDFF")],
+    },
+    "莫兰迪晨雾": {
+        "bg": "#EDEAE5E6", "panel": "#F4F1EC", "card": "#FFFFFF",
+        "card_hover": "#EAE5DE", "text": "#3A352F", "sub": "#8C857B",
+        "accent": "#B08968", "accent2": "#C9A384", "border": "#E0DAD0",
+        "shadow": "#5A5048", "done": "#C2BAAF",
+        "gradient": [(0.0, "#D8CFC2"), (0.5, "#C9B6AE"), (1.0, "#A8B5AE")],
     },
 }
 THEME_ORDER = list(THEMES.keys())
@@ -401,6 +527,8 @@ class Store:
             # 新增字段：备注、所属项目（空串表示日常待办）
             t.setdefault("note", "")
             t.setdefault("project", "")
+            # 强提醒配置：与默认值合并，兼容老数据缺字段
+            t["strong"] = {**_default_strong(), **(t.get("strong") or {})}
 
     def save(self):
         try:
@@ -421,6 +549,7 @@ class Store:
             "note": note, "project": project,
             "created": datetime.datetime.now().isoformat(timespec="seconds"),
             "notified": False,
+            "strong": _default_strong(),
         })
         self.save()
         return tid
@@ -470,6 +599,7 @@ class Store:
                 "remind": "到期当天", "remind_log": [],
                 "note": parsed["note"], "project": project,
                 "created": now_iso, "notified": False,
+                "strong": _default_strong(),
             })
             n += 1
         if n:
@@ -934,6 +1064,34 @@ REMIND_ICON = "🔔"
 # 旧数据迁移：老版本提醒值（曾以“天”为单位）-> 新的分钟制文字
 REMIND_MIGRATE = {"提前1天": "提前1天", "提前3天": "提前3天"}
 
+# 强提醒：时间单位
+STRONG_UNITS = ["天", "小时", "分钟"]
+STRONG_UNIT_SECONDS = {"天": 86400, "小时": 3600, "分钟": 60}
+
+
+def _default_strong():
+    """单条待办的“强提醒”配置默认值。"""
+    return {
+        "enabled": False,        # 是否启用强提醒
+        "before_value": 1,       # 截止前 N
+        "before_unit": "天",     # 天/小时/分钟
+        "interval_value": 2,     # 每 N
+        "interval_unit": "小时", # 天/小时/分钟
+        "max_count": 0,          # 最多提醒次数（0 = 不限）
+        "float_window": False,   # 是否用悬浮小西瓜浮窗提醒
+        "count": 0,              # 已提醒次数（运行时累计）
+        "last": None,            # 上次提醒时间（ISO 字符串）
+    }
+
+
+def _strong_seconds(value, unit):
+    """把“数值+单位”换算成秒，做最小值保护，避免过于频繁的强提醒。"""
+    try:
+        sec = int(value) * STRONG_UNIT_SECONDS.get(unit, 3600)
+    except Exception:
+        sec = 3600
+    return max(60, sec)  # 下限 60 秒，防止刷屏
+
 
 class ReminderPopup(QWidget):
     """居中显示的高颜值提醒弹窗：无边框、圆角、阴影、跟随主题配色。
@@ -1050,6 +1208,182 @@ class ReminderPopup(QWidget):
         self._result_loop.exec()
 
 
+class StrongRemindDialog(QDialog):
+    """强提醒设置窗口：与主题一致。设置“截止前多久开始 / 每多久一次 / 最多几次 /
+    是否用悬浮小西瓜浮窗提醒”，写回到任务数据的 strong 字段。
+
+    enabled 不再需要单独勾选：只要设置了提醒参数或勾选了浮窗，就视为已启用强提醒。
+    窗口采用「透明无边框外壳 + 不透明圆角面板(surface)」结构，跨平台（macOS/Windows）
+    渲染一致，避免直接把控件画在透明无边框窗口上导致的错位与重影。
+    """
+
+    def __init__(self, theme, task, parent=None):
+        super().__init__(parent)
+        self.theme = theme
+        self.task = task
+        self.setWindowTitle("强提醒设置")
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setMinimumWidth(400)
+        self.setModal(True)
+        self._build()
+
+    def _build(self):
+        t = self.theme
+        s = self.task.get("strong") or _default_strong()
+
+        # 透明外壳，仅承载一个不透明圆角面板
+        shell = QVBoxLayout(self)
+        shell.setContentsMargins(0, 0, 0, 0)
+
+        surface = QFrame()
+        surface.setObjectName("dialogSurface")
+        shadow = QGraphicsDropShadowEffect(surface)
+        shadow.setBlurRadius(34)
+        shadow.setOffset(0, 8)
+        shadow_color = QColor(t["text"])
+        shadow_color.setAlpha(55)
+        shadow.setColor(shadow_color)
+        surface.setGraphicsEffect(shadow)
+        shell.addWidget(surface)
+
+        root = QVBoxLayout(surface)
+        root.setContentsMargins(24, 22, 24, 20)
+        root.setSpacing(13)
+
+        title = QLabel("🔔 强提醒设置")
+        title.setStyleSheet(f"color:{t['text']};font-size:17px;font-weight:bold;")
+        root.addWidget(title)
+
+        sub = QLabel("任务：" + (self.task.get("text") or "")[:40])
+        sub.setWordWrap(True)
+        sub.setStyleSheet(f"color:{t['sub']};font-size:12px;")
+        root.addWidget(sub)
+
+        # 截止前 N 单位 开始提醒
+        row1 = QHBoxLayout()
+        row1.setSpacing(8)
+        row1.addWidget(QLabel("在截止前"), 0, Qt.AlignVCenter)
+        self.spin_before = QSpinBox()
+        self.spin_before.setRange(0, 999)
+        self.spin_before.setValue(int(s.get("before_value", 1)))
+        self.combo_before = QComboBox()
+        self.combo_before.addItems(STRONG_UNITS)
+        self.combo_before.setCurrentText(s.get("before_unit", "天"))
+        row1.addWidget(self.spin_before, 0, Qt.AlignVCenter)
+        row1.addWidget(self.combo_before, 0, Qt.AlignVCenter)
+        row1.addWidget(QLabel("开始提醒"), 0, Qt.AlignVCenter)
+        row1.addStretch()
+        root.addLayout(row1)
+
+        # 每隔 N 单位 提醒一次
+        row2 = QHBoxLayout()
+        row2.setSpacing(8)
+        row2.addWidget(QLabel("每隔"), 0, Qt.AlignVCenter)
+        self.spin_interval = QSpinBox()
+        self.spin_interval.setRange(1, 999)
+        self.spin_interval.setValue(int(s.get("interval_value", 2)))
+        self.combo_interval = QComboBox()
+        self.combo_interval.addItems(STRONG_UNITS)
+        self.combo_interval.setCurrentText(s.get("interval_unit", "小时"))
+        row2.addWidget(self.spin_interval, 0, Qt.AlignVCenter)
+        row2.addWidget(self.combo_interval, 0, Qt.AlignVCenter)
+        row2.addWidget(QLabel("提醒一次"), 0, Qt.AlignVCenter)
+        row2.addStretch()
+        root.addLayout(row2)
+
+        # 最多提醒 N 次
+        row3 = QHBoxLayout()
+        row3.setSpacing(8)
+        row3.addWidget(QLabel("最多提醒"), 0, Qt.AlignVCenter)
+        self.spin_max = QSpinBox()
+        self.spin_max.setRange(0, 999)
+        self.spin_max.setValue(int(s.get("max_count", 0)))
+        row3.addWidget(self.spin_max, 0, Qt.AlignVCenter)
+        row3.addWidget(QLabel("次（0 = 不限）"), 0, Qt.AlignVCenter)
+        row3.addStretch()
+        root.addLayout(row3)
+
+        # 浮窗提醒（勾选即视为启用强提醒）
+        self.chk_float = QCheckBox("用悬浮小西瓜浮窗提醒（在西瓜上弹出）")
+        self.chk_float.setChecked(bool(s.get("float_window")))
+        root.addWidget(self.chk_float)
+
+        root.addStretch()
+
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.button(QDialogButtonBox.Ok).setText("确定")
+        bb.button(QDialogButtonBox.Cancel).setText("取消")
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        root.addWidget(bb)
+
+        # 统一的输入框高度，保证上下对齐
+        for w in (self.spin_before, self.combo_before,
+                  self.spin_interval, self.combo_interval, self.spin_max):
+            w.setFixedHeight(34)
+
+        self.setStyleSheet(self._dlg_style())
+
+    def _dlg_style(self):
+        t = self.theme
+        return f"""
+        QDialog {{ background: transparent; }}
+        QFrame#dialogSurface {{
+            background: {t['panel']}; border: 1px solid {t['border']};
+            border-radius: 17px;
+        }}
+        QLabel {{ color: {t['text']}; font-size: 13px; }}
+        QSpinBox, QComboBox {{
+            background: {t['card']}; color: {t['text']};
+            border: 1px solid {t['border']}; border-radius: 10px;
+            padding: 4px 10px; font-size: 13px;
+        }}
+        QSpinBox:hover, QComboBox:hover {{ border-color: {_qss_alpha(t['accent'], 0x80)}; }}
+        QSpinBox:focus, QComboBox:focus {{ border: 1px solid {t['accent']}; }}
+        QComboBox::drop-down {{ border: none; width: 28px; background: transparent; }}
+        QComboBox::down-arrow {{ image: none; width: 0; height: 0; border: none; }}
+        QComboBox QAbstractItemView {{
+            background: {t['panel']}; color: {t['text']};
+            selection-background-color: {t['accent']}; selection-color: #FFFFFF;
+            border: 1px solid {t['border']}; border-radius: 9px;
+            outline: none; padding: 4px;
+        }}
+        QCheckBox {{
+            color: {t['text']}; font-size: 13px; spacing: 7px;
+        }}
+        QCheckBox::indicator {{
+            width: 17px; height: 17px; border-radius: 5px;
+            border: 1px solid {t['border']}; background: {t['card']};
+        }}
+        QCheckBox::indicator:hover {{ border-color: {t['accent']}; }}
+        QCheckBox::indicator:checked {{
+            background: {t['accent']}; border-color: {t['accent']};
+        }}
+        QPushButton {{
+            background: {t['accent']}; color: #FFFFFF; border: none;
+            border-radius: 10px; padding: 9px 18px; font-size: 13px; font-weight: bold;
+        }}
+        QPushButton:hover {{ background: {t['accent2']}; }}
+        """
+
+    def accept(self):
+        s = self.task.setdefault("strong", _default_strong())
+        # 只要设置了提醒参数或勾选了浮窗，即视为已启用强提醒（无需单独勾选框）
+        s["enabled"] = bool(
+            self.chk_float.isChecked()
+            or self.spin_before.value() > 0
+            or self.spin_interval.value() > 0
+        )
+        s["before_value"] = self.spin_before.value()
+        s["before_unit"] = STRONG_UNITS[self.combo_before.currentIndex()]
+        s["interval_value"] = self.spin_interval.value()
+        s["interval_unit"] = STRONG_UNITS[self.combo_interval.currentIndex()]
+        s["max_count"] = self.spin_max.value()
+        s["float_window"] = self.chk_float.isChecked()
+        super().accept()
+
+
 class FlowLayout(QLayout):
     """自动换行的流式布局：标签放不下时自动换到下一行，避免撑爆父容器。"""
     def __init__(self, parent=None, margin=0, hspacing=6, vspacing=4):
@@ -1119,6 +1453,521 @@ class FlowLayout(QLayout):
         return y + line_height - rect.y()
 
 
+def _hexa_color(s):
+    """把 #RRGGBBAA（alpha 在后）解析成 QColor，兼容 #RRGGBB。"""
+    s = s.lstrip("#")
+    r, g, b = int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16)
+    a = int(s[6:8], 16) if len(s) >= 8 else 255
+    return QColor(r, g, b, a)
+
+
+class _ThemePreview(QFrame):
+    """主题预览的背景层：如实绘制该主题的渐变/底色（与主窗口同款画法）。"""
+
+    def __init__(self, theme, parent=None):
+        super().__init__(parent)
+        self.theme = theme
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        rect = self.rect().adjusted(1, 1, -1, -1)
+        path = QPainterPath()
+        path.addRoundedRect(rect, 10, 10)
+        gs = self.theme.get("gradient")
+        if gs:
+            g = QLinearGradient(rect.topLeft(), rect.bottomRight())
+            for pos, col in gs:
+                g.setColorAt(pos, QColor(col))
+            p.fillPath(path, QBrush(g))
+        else:
+            bg = self.theme["bg"]
+            c = QColor(bg) if len(bg) <= 7 else _hexa_color(bg)
+            p.fillPath(path, QBrush(c))
+        p.setPen(QPen(QColor(self.theme["border"]), 1))
+        p.drawPath(path)
+        p.end()
+
+
+class _ThemeCard(QFrame):
+    """主题市场卡片：背景渐变预览 + 迷你待办 + 选中角标，点击即应用。"""
+    clicked = Signal(str)   # 主题名
+
+    def __init__(self, name, theme, selected, parent=None):
+        super().__init__(parent)
+        self.name = name
+        self.theme = theme
+        self.setFixedSize(186, 184)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setObjectName("themecard")
+
+        sh = QGraphicsDropShadowEffect(self)
+        sh.setBlurRadius(20)
+        sh.setOffset(0, 4)
+        sc = QColor(theme.get("shadow") or theme["border"])
+        sc.setAlpha(70)
+        sh.setColor(sc)
+        self.setGraphicsEffect(sh)
+
+        v = QVBoxLayout(self)
+        v.setContentsMargins(10, 10, 10, 10)
+        v.setSpacing(8)
+
+        # ---- 预览：真实绘制背景渐变，上面摆迷你待办 ----
+        prev = _ThemePreview(theme)
+        ph = QVBoxLayout(prev)
+        ph.setContentsMargins(9, 9, 9, 9)
+        ph.setSpacing(6)
+        ph.addWidget(self._mock_item(theme, 48, 5, theme["accent"], theme["text"]))
+        ph.addWidget(self._mock_item(theme, 36, 4, theme["done"], theme["sub"]))
+        ph.addStretch()
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addStretch()
+        ab = QFrame()
+        ab.setFixedSize(32, 10)
+        ab.setStyleSheet(f"background:{theme['accent']}; border-radius:5px;")
+        row.addWidget(ab)
+        ph.addLayout(row)
+        v.addWidget(prev, 1)
+
+        # ---- 名称（用该主题 panel 做底色 chip，保证可读）----
+        lbl = QLabel(name)
+        lbl.setAlignment(Qt.AlignHCenter)
+        lbl.setStyleSheet(
+            f"color:{theme['text']}; background:{theme['panel']};"
+            f" border:1px solid {theme['border']}; border-radius:9px;"
+            f" padding:3px 10px; font-size:12px; font-weight:bold;")
+        v.addWidget(lbl, 0, Qt.AlignHCenter)
+
+        # ---- 选中角标 ----
+        self._badge = QLabel("✓", self)
+        self._badge.setFixedSize(22, 22)
+        self._badge.setAlignment(Qt.AlignCenter)
+        self._badge.setStyleSheet(
+            f"color:#FFFFFF; background:{theme['accent']}; border-radius:11px;"
+            f" font-size:12px; font-weight:bold;"
+            f" border:2px solid {theme['panel']};")
+
+        self._refresh(selected)
+
+    def _mock_item(self, theme, bar_w, bar_h, dot_color, bar_color):
+        """一条迷你待办：圆点 + 文本条（模拟卡片浮在背景上）。"""
+        f = QFrame()
+        f.setFixedHeight(24)
+        f.setStyleSheet(
+            f"background:{theme['card']}; border:1px solid {theme['border']};"
+            f" border-radius:6px;")
+        h = QHBoxLayout(f)
+        h.setContentsMargins(7, 6, 7, 6)
+        h.setSpacing(6)
+        dot = QFrame()
+        dot.setFixedSize(9, 9)
+        dot.setStyleSheet(f"background:{dot_color}; border-radius:4px;")
+        h.addWidget(dot, 0, Qt.AlignVCenter)
+        bar = QFrame()
+        bar.setFixedSize(bar_w, bar_h)
+        bar.setStyleSheet(f"background:{bar_color}; border-radius:2px;")
+        h.addWidget(bar, 0, Qt.AlignVCenter)
+        h.addStretch()
+        return f
+
+    def _refresh(self, selected):
+        t = self.theme
+        bord = t["accent"] if selected else "transparent"
+        w = "2px" if selected else "1px"
+        self.setStyleSheet(
+            f"_ThemeCard#themecard{{background:transparent;"
+            f" border:{w} solid {bord}; border-radius:14px;}}"
+            f"_ThemeCard#themecard:hover{{ border:2px solid {t['accent']};}}")
+        self._badge.setVisible(selected)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._badge.move(self.width() - self._badge.width() - 7, 7)
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self.clicked.emit(self.name)
+        super().mousePressEvent(e)
+
+
+# DIY 配色可编辑的颜色项：(主题键, 中文名)
+_DIY_KEYS = [
+    ("accent", "主色"), ("accent2", "副色"), ("panel", "面板"),
+    ("card", "卡片"), ("text", "文字"), ("sub", "副文字"), ("border", "边框"),
+]
+
+
+class DIYColorDialog(QDialog):
+    """DIY 配色专属弹窗：逐项取色 → 主窗口实时预览 → 取名保存为自定义主题。
+    取消则把主窗口还原到打开前的配色。结构沿用透明外壳 + 圆角面板。"""
+
+    def __init__(self, main_window, parent=None):
+        super().__init__(parent)
+        self.main = main_window
+        self.setWindowTitle("DIY 配色")
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setModal(True)
+        # 打开前的配色快照：取消/关闭时用它还原
+        self._orig_theme = dict(self.main.theme)
+        self._diy = {k: self.main.theme.get(k, "#888888") for k, _ in _DIY_KEYS}
+        self._saved = False
+        self._build()
+
+    # ---- 配色 → 完整主题 dict ----
+    def _theme_dict(self):
+        d = self._diy
+        return {
+            "bg": d["panel"], "panel": d["panel"], "card": d["card"],
+            "card_hover": d["card"], "text": d["text"], "sub": d["sub"],
+            "accent": d["accent"], "accent2": d["accent2"],
+            "border": d["border"], "shadow": "#000000", "done": d["sub"],
+        }
+
+    def _build(self):
+        t = self.main.theme
+        shell = QVBoxLayout(self)
+        shell.setContentsMargins(0, 0, 0, 0)
+
+        surface = QFrame()
+        surface.setObjectName("dialogSurface")
+        shadow = QGraphicsDropShadowEffect(surface)
+        shadow.setBlurRadius(30)
+        shadow.setOffset(0, 8)
+        sc = QColor(t["text"]); sc.setAlpha(55)
+        shadow.setColor(sc)
+        surface.setGraphicsEffect(shadow)
+        shell.addWidget(surface)
+
+        root = QVBoxLayout(surface)
+        root.setContentsMargins(22, 20, 22, 18)
+        root.setSpacing(12)
+
+        title = QLabel("🎛 DIY 配色")
+        title.setStyleSheet(f"color:{t['text']};font-size:16px;font-weight:bold;")
+        root.addWidget(title)
+        sub = QLabel("点击色块取色，主界面会实时预览；起个名字保存成你的专属主题")
+        sub.setStyleSheet(f"color:{t['sub']};font-size:11px;")
+        root.addWidget(sub)
+
+        # ---- 名称 ----
+        nrow = QHBoxLayout()
+        nrow.setSpacing(8)
+        nlbl = QLabel("名称")
+        nlbl.setStyleSheet(f"color:{t['text']};font-size:13px;font-weight:600;")
+        nrow.addWidget(nlbl)
+        self.ed_name = QLineEdit()
+        self.ed_name.setPlaceholderText("例如：我的配色")
+        # 当前若正处在某套自定义主题上，默认沿用其名，方便覆盖更新
+        cur = self.main.theme_name
+        if cur in (self.main.cfg.get("custom_themes") or {}):
+            self.ed_name.setText(cur)
+        self.ed_name.setFixedHeight(32)
+        nrow.addWidget(self.ed_name, 1)
+        root.addLayout(nrow)
+
+        # ---- 颜色项（两列网格：标签 + 色块按钮）----
+        from PySide6.QtWidgets import QGridLayout
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(14)
+        grid.setVerticalSpacing(10)
+        self._swatches = {}
+        for i, (key, label) in enumerate(_DIY_KEYS):
+            r, c = divmod(i, 2)
+            lbl = QLabel(label)
+            lbl.setStyleSheet(f"color:{t['text']};font-size:13px;")
+            lbl.setFixedWidth(48)
+            btn = QPushButton()
+            btn.setFixedSize(108, 30)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.clicked.connect(lambda _=False, k=key: self._pick_color(k))
+            self._swatches[key] = btn
+            self._style_swatch(key)
+            cell = QHBoxLayout()
+            cell.setSpacing(8)
+            cell.addWidget(lbl)
+            cell.addWidget(btn)
+            cell.addStretch()
+            grid.addLayout(cell, r, c)
+        root.addLayout(grid)
+
+        # ---- 迷你预览条 ----
+        self._preview = _ThemePreview(self._theme_dict())
+        self._preview.setFixedHeight(64)
+        root.addWidget(self._preview)
+
+        # ---- 底部按钮 ----
+        foot = QHBoxLayout()
+        foot.setSpacing(8)
+        foot.addStretch()
+        btn_cancel = QPushButton("取消")
+        btn_cancel.setObjectName("ghost")
+        btn_cancel.setCursor(Qt.PointingHandCursor)
+        btn_cancel.clicked.connect(self.reject)
+        foot.addWidget(btn_cancel)
+        btn_save = QPushButton("保存主题")
+        btn_save.setCursor(Qt.PointingHandCursor)
+        btn_save.clicked.connect(self._save)
+        foot.addWidget(btn_save)
+        root.addLayout(foot)
+
+        self.setMinimumWidth(430)
+        self.setStyleSheet(self._dlg_style())
+
+    def _style_swatch(self, key):
+        color = self._diy[key]
+        tc = "#FFFFFF" if QColor(color).lightness() < 140 else "#222222"
+        btn = self._swatches[key]
+        btn.setText(color.upper())
+        btn.setStyleSheet(
+            f"QPushButton{{background:{color}; color:{tc};"
+            f" border:2px solid {self.main.theme['border']};"
+            f" border-radius:8px; font-size:11px; font-weight:600;}}")
+
+    def _pick_color(self, key):
+        from PySide6.QtWidgets import QColorDialog
+        c = QColorDialog.getColor(QColor(self._diy[key]), self, "选择颜色")
+        if not c.isValid():
+            return
+        self._diy[key] = c.name()
+        self._style_swatch(key)
+        th = self._theme_dict()
+        self._preview.theme = th
+        self._preview.update()
+        # 主窗口实时预览（不落盘）
+        self.main._preview_theme(th)
+
+    def _save(self):
+        name = self.ed_name.text().strip() or "我的配色"
+        customs = self.main.cfg.setdefault("custom_themes", {})
+        # 与内置主题重名时自动加后缀，避免覆盖内置配色
+        if name in THEMES and name not in customs:
+            name += "·DIY"
+        theme = self._theme_dict()
+        customs[name] = theme
+        THEMES[name] = theme
+        if name not in THEME_ORDER:
+            THEME_ORDER.append(name)
+        self._saved = True
+        self.main._set_theme(name)   # 内部会 _save_cfg，连同 custom_themes 持久化
+        self.accept()
+
+    def reject(self):
+        # 取消：把主窗口还原到打开前的配色
+        if not self._saved:
+            self.main._preview_theme(self._orig_theme)
+        super().reject()
+
+    def _dlg_style(self):
+        t = self.main.theme
+        return f"""
+        QDialog {{ background: transparent; }}
+        QFrame#dialogSurface {{
+            background: {t['panel']}; border: 1px solid {t['border']};
+            border-radius: 18px;
+        }}
+        QLineEdit {{
+            background: {t['card']}; color: {t['text']};
+            border: 1px solid {t['border']}; border-radius: 8px;
+            padding: 4px 10px; font-size: 13px;
+        }}
+        QLineEdit:focus {{ border: 1px solid {t['accent']}; }}
+        QPushButton {{ background: {t['accent']}; color: #FFFFFF; border: none;
+            border-radius: 9px; padding: 8px 16px; font-size: 13px; font-weight: bold; }}
+        QPushButton:hover {{ background: {t['accent2']}; }}
+        QPushButton#ghost {{ background: transparent; color: {t['sub']};
+            border: 1px solid {t['border']}; font-weight: 600; }}
+        QPushButton#ghost:hover {{ color: {t['accent']}; border-color: {t['accent']}; }}
+        """
+
+
+class ThemeMarketDialog(QDialog):
+    """主题市场：以卡片网格浏览所有主题，点击即时应用（实时预览）。
+    结构与强提醒弹窗一致——透明外壳 + 不透明圆角面板，跨平台渲染稳定。"""
+
+    def __init__(self, main_window, parent=None):
+        super().__init__(parent)
+        self.main = main_window
+        self.setWindowTitle("主题市场")
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setMinimumWidth(560)
+        self.setMinimumHeight(480)
+        self.setModal(True)
+        self._cards = []
+        self._build()
+
+    def _build(self):
+        t = self.main.theme
+        shell = QVBoxLayout(self)
+        shell.setContentsMargins(0, 0, 0, 0)
+
+        surface = QFrame()
+        surface.setObjectName("dialogSurface")
+        shadow = QGraphicsDropShadowEffect(surface)
+        shadow.setBlurRadius(34)
+        shadow.setOffset(0, 8)
+        sc = QColor(t["text"]); sc.setAlpha(55)
+        shadow.setColor(sc)
+        surface.setGraphicsEffect(shadow)
+        shell.addWidget(surface)
+
+        root = QVBoxLayout(surface)
+        root.setContentsMargins(22, 20, 22, 18)
+        root.setSpacing(12)
+
+        head = QHBoxLayout()
+        head.setSpacing(8)
+        title_col = QVBoxLayout()
+        title_col.setSpacing(2)
+        title = QLabel("🎨 主题市场")
+        title.setStyleSheet(f"color:{t['text']};font-size:17px;font-weight:bold;")
+        subtitle = QLabel("点击卡片即时预览，选中后点“完成”即可")
+        subtitle.setStyleSheet(f"color:{t['sub']};font-size:11px;")
+        title_col.addWidget(title)
+        title_col.addWidget(subtitle)
+        head.addLayout(title_col)
+        head.addStretch()
+        self._sub = QLabel()
+        self._sub.setStyleSheet(f"color:{t['accent']};font-size:12px;font-weight:bold;")
+        head.addWidget(self._sub, 0, Qt.AlignVCenter)
+        root.addLayout(head)
+
+        # ---- 主题卡片网格（可滚动）----
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QFrame.NoFrame)
+        self._scroll.setObjectName("scroll")
+        self._rebuild_grid()
+        root.addWidget(self._scroll, 1)
+
+        # 底部：DIY 配色 + 背景图片 + 完成
+        foot = QHBoxLayout()
+        foot.setSpacing(8)
+        btn_diy = QPushButton("🎛  DIY 配色…")
+        btn_diy.setObjectName("ghost")
+        btn_diy.setCursor(Qt.PointingHandCursor)
+        btn_diy.clicked.connect(self._open_diy)
+        foot.addWidget(btn_diy)
+        btn_bg = QPushButton("🖼  上传背景图片…")
+        btn_bg.setObjectName("ghost")
+        btn_bg.setCursor(Qt.PointingHandCursor)
+        btn_bg.clicked.connect(lambda: (self.main._pick_bg_image(), self._sync_bg_btn(btn_clr)))
+        foot.addWidget(btn_bg)
+        btn_clr = QPushButton("🗑  清除背景图片")
+        btn_clr.setObjectName("ghost")
+        btn_clr.setCursor(Qt.PointingHandCursor)
+        btn_clr.clicked.connect(lambda: (self.main._clear_bg_image(), self._sync_bg_btn(btn_clr)))
+        foot.addWidget(btn_clr)
+        foot.addStretch()
+        btn_done = QPushButton("完成")
+        btn_done.setCursor(Qt.PointingHandCursor)
+        btn_done.clicked.connect(self.accept)
+        foot.addWidget(btn_done)
+        root.addLayout(foot)
+
+        self._sync_bg_btn(btn_clr)
+        self.setStyleSheet(self._dlg_style())
+
+    def _sync_bg_btn(self, btn_clr):
+        has = bool(self.main.cfg.get("bg_image"))
+        btn_clr.setEnabled(has)
+
+    def _apply(self, name):
+        self.main._set_theme(name)
+        # 同步卡片选中态 + 配色（主题切换后面板色也变了，刷新样式）
+        cur = self.main.theme_name
+        for c in self._cards:
+            c._refresh(c.name == cur)
+        self._sub.setText("当前：" + cur)
+        self.setStyleSheet(self._dlg_style())
+
+    # ---- DIY 配色 ----
+    def _open_diy(self):
+        """打开 DIY 配色专属弹窗；关闭后刷新卡片网格与自身样式。"""
+        dlg = DIYColorDialog(self.main, self)
+        dlg.exec()
+        self._rebuild_grid()
+        self._sub.setText("当前：" + self.main.theme_name)
+        self.setStyleSheet(self._dlg_style())
+
+    def _rebuild_grid(self):
+        old = self._scroll.widget()
+        inner = QWidget()
+        inner.setObjectName("inner")
+        flow = FlowLayout(inner, margin=6, hspacing=14, vspacing=14)
+        self._cards = []
+        # 只展示前 8 个示例主题，但确保当前正在使用的主题始终可见
+        shown = THEME_ORDER[:8]
+        if self.main.theme_name not in shown and self.main.theme_name in THEME_ORDER:
+            shown = shown[:-1] + [self.main.theme_name]
+        for name in shown:
+            th = THEMES[name]
+            card = _ThemeCard(name, th, name == self.main.theme_name)
+            card.clicked.connect(self._apply)
+            self._cards.append(card)
+            flow.addWidget(card)
+        self._scroll.setWidget(inner)
+        if old is not None:
+            old.deleteLater()
+
+    def _dlg_style(self):
+        t = self.main.theme
+        return f"""
+        QDialog {{ background: transparent; }}
+        QFrame#dialogSurface {{
+            background: {t['panel']}; border: 1px solid {t['border']};
+            border-radius: 18px;
+        }}
+        QScrollArea {{ background: transparent; border: none; }}
+        QWidget#inner {{ background: transparent; }}
+        QLabel {{ color: {t['text']}; font-size: 13px; }}
+        QPushButton {{ background: {t['accent']}; color: #FFFFFF; border: none;
+            border-radius: 9px; padding: 8px 16px; font-size: 13px; font-weight: bold; }}
+        QPushButton:hover {{ background: {t['accent2']}; }}
+        QPushButton#ghost {{ background: transparent; color: {t['sub']};
+            border: 1px solid {t['border']}; font-weight: 600; }}
+        QPushButton#ghost:hover {{ color: {t['accent']}; border-color: {t['accent']}; }}
+        QPushButton#ghost:disabled {{ color: {t['done']}; border-color: {t['border']}; }}
+        """
+
+
+def _pencil_icon(px: int = 18) -> QIcon:
+    """绘制“编辑”铅笔图标。
+
+    macOS 上系统字体的 ✏️ 朝向与期望相反，故渲染为位图后做一次水平镜像；
+    Windows 上 ✏️ 本就朝向正确，保持原样。用位图承载可保证跨平台方向一致。
+    """
+    dpr = 2
+    try:
+        screen = QApplication.primaryScreen()
+        if screen:
+            dpr = max(1, int(screen.devicePixelRatio()))
+    except Exception:
+        pass
+    pm = QPixmap(px * dpr, px * dpr)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing, True)
+    p.setRenderHint(QPainter.SmoothPixmapTransform, True)
+    f = QFont()
+    if IS_MAC:
+        f.setFamily("Apple Color Emoji")
+    elif IS_WIN:
+        f.setFamily("Segoe UI Emoji")
+    f.setPixelSize(int(px * 0.95))
+    p.setFont(f)
+    p.drawText(pm.rect(), Qt.AlignCenter, "✏️")
+    p.end()
+    pm.setDevicePixelRatio(dpr)
+    if IS_MAC:
+        pm = pm.transformed(QTransform.fromScale(-1, 1), Qt.SmoothTransformation)
+        pm.setDevicePixelRatio(dpr)
+    return QIcon(pm)
+
+
 class TaskCard(QFrame):
     toggled = Signal(str)
     deleted = Signal(str)
@@ -1126,6 +1975,7 @@ class TaskCard(QFrame):
     sub_toggled = Signal(str, int)   # (任务id, 子任务索引)
     select_toggled = Signal(str, bool)   # (任务id, 是否选中)
     pinned = Signal(str)   # (任务id) 切换置顶
+    configure_strong = Signal(str)   # (任务id) 打开强提醒设置
     def __init__(self, task, theme, parent=None, select_mode=False, selected=False):
         super().__init__(parent)
         self.task = task
@@ -1226,6 +2076,12 @@ class TaskCard(QFrame):
             self.remind_lbl = QLabel(REMIND_ICON + rm)
             self.remind_lbl.setObjectName("recur")
             meta.addWidget(self.remind_lbl)
+        # 强提醒标识：启用时显示 🔔（带“强”字），提示该待办有强提醒
+        if self.task.get("strong", {}).get("enabled"):
+            self.strong_badge = QLabel("🔔强")
+            self.strong_badge.setObjectName("strongbadge")
+            self.strong_badge.setToolTip("已开启强提醒")
+            meta.addWidget(self.strong_badge)
         # 子任务进度徽章（可点击展开/收起）
         subs = self.task.get("subtasks", [])
         if subs:
@@ -1240,7 +2096,9 @@ class TaskCard(QFrame):
 
         # 编辑按钮（悬浮显示，唯一保留在卡片上的按钮）
         # 用透明度控制显隐而非 setVisible，避免布局宽度突变导致卡片内容“跳动”
-        self.edit_btn = QPushButton("✏️")
+        self.edit_btn = QPushButton()
+        self.edit_btn.setIcon(_pencil_icon(18))
+        self.edit_btn.setIconSize(QSize(18, 18))
         self.edit_btn.setObjectName("edit")
         self.edit_btn.setFixedSize(27, 27)
         self.edit_btn.setToolTip("编辑待办")
@@ -1415,6 +2273,11 @@ class TaskCard(QFrame):
                 border: 1px solid {_qss_alpha(t['accent'], 0x25 if not done else 0x12)};
                 border-radius: 8px; padding: 3px 8px;
             }}
+            QLabel#strongbadge {{
+                color: #FFFFFF; font-size: 11px; font-weight: bold;
+                background: {t['accent']}; border: 1px solid {t['accent']};
+                border-radius: 8px; padding: 3px 8px;
+            }}
             QPushButton#del, QPushButton#edit {{
                 background: {t['panel']}; border: 1px solid {t['border']};
                 border-radius: 8px; color: {t['sub']}; font-size: 13px;
@@ -1491,6 +2354,8 @@ class TaskCard(QFrame):
             label = "📂  收起小步骤" if self.sub_panel.isVisible() else "📂  展开小步骤"
             act_subs = menu.addAction(label)
         menu.addSeparator()
+        act_strong = menu.addAction("🔔  强提醒")
+        menu.addSeparator()
         act_del = menu.addAction("🗑  删除待办")
         chosen = menu.exec(e.globalPos())
         if chosen == act_pin:
@@ -1499,6 +2364,8 @@ class TaskCard(QFrame):
             self.edited.emit(self.task["id"])
         elif act_subs is not None and chosen == act_subs:
             self._toggle_subs()
+        elif chosen == act_strong:
+            self.configure_strong.emit(self.task["id"])
         elif chosen == act_del:
             self.deleted.emit(self.task["id"])
 
@@ -1510,6 +2377,71 @@ class TaskCard(QFrame):
 # ----------------------------------------------------------------------------
 # 桌面悬浮小西瓜
 # ----------------------------------------------------------------------------
+_BALL_SPEECH = [
+    "抱抱西瓜，歇会儿吧～",
+    "今天也要元气满满 🍉",
+    "待办再多，慢慢来不急",
+    "记得喝水哦 💧",
+    "你辛苦啦，奖励自己一口西瓜",
+    "深呼吸，世界不会崩塌",
+    "别绷太紧，西瓜都替你放松啦",
+]
+
+# 任务提醒文案模板（{task}=任务名），简洁、无引号、无形容词，尽量一行显示
+_BALL_TASK_TEMPLATES = [
+    "记得{task}哦～",
+    "别忘了{task}哦",
+    "该做{task}啦",
+    "{task}还没做呢，记得哦",
+]
+
+# 完成待办后的庆祝文案（{n}=今日已完成数）
+_BALL_CELEBRATE = [
+    "哇你太棒了！今天已完成 {n} 个待办 🎉",
+    "厉害！今天 {n} 个待办搞定啦 ✨",
+    "牛！{n} 个完成，继续冲 💪",
+    "太赞了～今天 {n} 个待办收工 🍉",
+    "你超棒的，今天 {n} 个待办拿下！🌟",
+]
+
+
+class HoverBubble(QWidget):
+    """悬浮小西瓜的悬停气泡：鼠标移到西瓜上时，从它右上方“冒出”一句话。"""
+
+    def __init__(self):
+        super().__init__(None)
+        self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)      # 显示但不激活，不抢微信焦点
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)  # 鼠标穿透，不影响西瓜的 hover 检测
+        self._label = QLabel("", self)
+        self._label.setWordWrap(True)
+        self._label.setMaximumWidth(220)
+        self._label.setStyleSheet(
+            "QLabel{color:#2b2b2b;font:13px 'PingFang SC','Microsoft YaHei',sans-serif;}"
+        )
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(14, 10, 14, 10)
+        lay.addWidget(self._label)
+        self.adjustSize()
+
+    def set_text(self, text):
+        self._label.setText(text)
+        self.adjustSize()
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        r = self.rect().adjusted(1, 1, -1, -1)
+        p.setBrush(QColor(255, 255, 255, 240))
+        p.setPen(QColor(0, 0, 0, 25))
+        p.drawRoundedRect(r, 14, 14)
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        _mac_make_window_truly_transparent(self)
+
+
 class FloatingBall(QWidget):
     """桌面悬浮小西瓜：无边框、置顶、小圆形，可拖动。
     左键单击（非拖动）→ 唤起主界面；右键 → 菜单（退出）。"""
@@ -1530,76 +2462,44 @@ class FloatingBall(QWidget):
         self.setWindowFlags(_float_window_flags(topmost=True))
         _apply_no_steal_focus(self, accept_focus=False)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        # 主动开启 hover 事件投递 + 鼠标跟踪：不依赖窗口激活状态，
+        # 否则 macOS 上「不抢焦点」的窗口要先点一下才会收到 enter/leave。
+        self.setAttribute(Qt.WA_Hover, True)
+        self.setMouseTracking(True)
         self.setFixedSize(self.W, self.H)
         self.setCursor(Qt.PointingHandCursor)
         self.setToolTip("西瓜todo · 点击打开 / 右键退出")
+        # 悬停气泡防抖：进入西瓜本体才弹，且同一次悬停内不重复换台词
+        self._hover_in = False        # 当前光标是否在“西瓜本体”判定区内
+        self._hover_poll = QTimer(self)
+        self._hover_poll.setInterval(120)
+        self._hover_poll.timeout.connect(self._check_hover)
+        self._hover_poll.start()
         # ---- 动画状态 ----
         self._t = 0.0          # 累计时间（秒）
         self._blinking = 0.0     # 眨眼进度（>0 表示正在眨）
         import random as _rnd
         self._rnd = _rnd
-        from PySide6.QtCore import QTimer
         self._anim = QTimer(self)
         self._anim.setInterval(30)  # ~33fps
         self._anim.timeout.connect(self._on_anim_tick)
         self._anim.start()
-        # 载入西瓜图标（透明背景、只有西瓜本体的 SVG），高清渲染；失败回退 emoji
-        self._pixmap = None
-        self._pixmap_blink = None   # 闭眼版（眨眼时整脸切换，颜色纹路与原图一致）
-        try:
-            # 优先用精简版（无方形底/无阴影），找不到再退回原 logo
-            ball_path = _resource_path("watermelon_ball.svg")
-            svg_path = ball_path if ball_path.exists() else _resource_path("watermelon_logo.svg")
-            if svg_path.exists():
-                from PySide6.QtSvg import QSvgRenderer
-                from PySide6.QtCore import QByteArray
-                dpr = self.devicePixelRatioF() if hasattr(self, "devicePixelRatioF") else 1.0
-                px = int(self.SIZE * dpr)
-                from PySide6.QtGui import QPainter as _QP, QPixmap
-
-                def _render(renderer):
-                    pm = QPixmap(px, px)
-                    pm.fill(Qt.transparent)
-                    _pp = _QP(pm)
-                    _pp.setRenderHint(_QP.Antialiasing, True)
-                    renderer.render(_pp)
-                    _pp.end()
-                    pm.setDevicePixelRatio(dpr)
-                    return pm if not pm.isNull() else None
-
-                #睁眼版（原图）
-                self._pixmap = _render(QSvgRenderer(str(svg_path)))
-
-                # 闭眼版：读 SVG 文本，把左眼那组椭圆替换成一条闭眼弧线
-                try:
-                    svg_txt = svg_path.read_text(encoding="utf-8")
-                    open_eye = (
-                        '  <ellipse cx="384" cy="494" rx="73" ry="82" fill="#FFFFFF"\r\n'
-                        '           stroke="#F6E7E4" stroke-width="10"/>\r\n'
-                        '  <ellipse cx="397" cy="506" rx="43" ry="52" fill="#261D20"/>\r\n'
-                        '  <ellipse cx="380" cy="486" rx="16" ry="20" fill="#FFFFFF"/>\r\n'
-                        '  <circle cx="413" cy="528" r="8" fill="#FFFFFF" opacity="0.72"/>'
-                    )
-                    # 与右眼(M579 506 Q632 461 685 506)对称的左眼闭眼弧线
-                    closed_eye = (
-                        '  <path d="M339 506 Q392 461 445 506" fill="none"\r\n'
-                        '        stroke="#211A1C" stroke-width="19" stroke-linecap="round"/>'
-                    )
-                    if open_eye in svg_txt:
-                        blink_txt = svg_txt.replace(open_eye, closed_eye)
-                    else:
-                        # 换行符可能被规范化，用宽松替换：删掉四个眼睛椭圆块
-                        import re as _re
-                        blink_txt = _re.sub(
-                            r'<ellipse cx="384".*?<circle cx="413"[^/]*/>',
-                            closed_eye.strip(),
-                            svg_txt, count=1, flags=_re.S)
-                    r2 = QSvgRenderer(QByteArray(blink_txt.encode("utf-8")))
-                    self._pixmap_blink = _render(r2)
-                except Exception:
-                    self._pixmap_blink = None
-        except Exception:
-            self._pixmap = None
+        # ---- 表情 / 动作状态 ----
+        self._face = "normal"        # 当前表情名（normal/blink/cheerful/surprised/sleepy）
+        self._face_left = 0.0        # 非常态表情剩余秒数（归零则回到 normal）
+        self._dir = -1               # 行进方向：固定 -1（不再来回翻转，避免脚朝向怪异）
+        self._hop = 0.0              # 蹦跳能量（触发后衰减，叠加到弹跳高度上）
+        self._turn = 0.0             # 转身剩余秒数（>0 时绕竖直轴做 3D 转身，非 2D 翻跟头）
+        self._turn_dur = 1.0         # 单次转身时长（秒），用于算转身进度
+        self._particles = []         # 粒子（花瓣/星星/爱心），tick 更新、paintEvent 绘制
+        # 完成待办庆祝：轮询今日完成数，增加时撒花+弹庆祝气泡
+        self._done_today = None      # 上次见到的“今日已完成”数（None=尚未基线）
+        self._stat_tick = 0          # 轮询计数
+        self._celeb_cooldown = 0.0   # 庆祝冷却（秒），避免快速批量完成时刷屏
+        # 载入西瓜图标并预生成多套表情（睁眼/闭眼/开心/惊讶/犯困），高清渲染；失败回退 emoji
+        self._faces = self._build_faces()
+        self._pixmap = self._faces.get("normal")
+        self._pixmap_blink = self._faces.get("blink")
         # 初始位置：屏幕右下角上方一点
         try:
             scr = QApplication.primaryScreen().availableGeometry()
@@ -1614,6 +2514,290 @@ class FloatingBall(QWidget):
             self.move(x, y)
         except Exception:
             self.move(1000, 600)
+
+    def _build_faces(self):
+        """预渲染多套表情位图：normal/blink/cheerful/surprised/sleepy。
+
+        沿用既有“改 SVG 文本再渲染”的标准：读 watermelon_ball.svg 文本，按表情替换
+        “左眼”与“嘴巴”两段 SVG，用 QSvgRenderer 渲染成位图。右眼维持原 wink（角色特征）。
+        任一步失败返回空 dict，paintEvent 自动回退 emoji。"""
+        import re as _re
+        from PySide6.QtSvg import QSvgRenderer
+        from PySide6.QtCore import QByteArray
+        from PySide6.QtGui import QPainter as _QP, QPixmap
+        faces = {}
+        try:
+            ball_path = _resource_path("watermelon_ball.svg")
+            svg_path = ball_path if ball_path.exists() else _resource_path("watermelon_logo.svg")
+            if not svg_path.exists():
+                return faces
+            svg_txt = svg_path.read_text(encoding="utf-8")
+            dpr = self.devicePixelRatioF() if hasattr(self, "devicePixelRatioF") else 1.0
+            px = int(self.SIZE * dpr)
+
+            def _render(txt):
+                r = QSvgRenderer(QByteArray(txt.encode("utf-8")))
+                if not r.isValid():
+                    return None
+                pm = QPixmap(px, px)
+                pm.fill(Qt.transparent)
+                pp = _QP(pm)
+                pp.setRenderHint(_QP.Antialiasing, True)
+                r.render(pp)
+                pp.end()
+                pm.setDevicePixelRatio(dpr)
+                return pm if not pm.isNull() else None
+
+            # 原图即“常态”：左眼睁开 + 右眼笑 + 开心嘴
+            faces["normal"] = _render(svg_txt)
+
+            # 左眼 / 嘴巴 两段互不重叠，可先后替换
+            left_re = _re.compile(r'<!-- Open eye -->.*?(?=<!-- Winking eye -->)', _re.S)
+            mouth_re = _re.compile(r'<!-- Happy mouth -->.*?(?=</svg>)', _re.S)
+
+            def _face(left_eye_svg, mouth_svg=None):
+                """换左眼；mouth_svg 为 None 则保留原开心嘴。"""
+                txt = left_re.sub(
+                    f'<!-- Open eye -->\n  {left_eye_svg}\n', svg_txt, count=1)
+                if mouth_svg is not None:
+                    txt = mouth_re.sub(
+                        f'<!-- Happy mouth -->\n  {mouth_svg}\n', txt, count=1)
+                return _render(txt)
+
+            # ---- 左眼各形态（SVG 坐标，viewBox 1024）----
+            EYE_CLOSED = ('<path d="M339 506 Q392 461 445 506" fill="none" '
+                          'stroke="#211A1C" stroke-width="19" stroke-linecap="round"/>')
+            EYE_HAPPY = ('<path d="M335 520 Q392 466 449 520" fill="none" '
+                         'stroke="#211A1C" stroke-width="19" stroke-linecap="round"/>')
+            EYE_SURPRISED = (
+                '<ellipse cx="384" cy="494" rx="82" ry="82" fill="#FFFFFF" '
+                'stroke="#F6E7E4" stroke-width="10"/>\n'
+                '  <ellipse cx="384" cy="500" rx="50" ry="56" fill="#261D20"/>\n'
+                '  <ellipse cx="366" cy="478" rx="18" ry="22" fill="#FFFFFF"/>'
+            )
+            EYE_SLEEPY = (
+                '<path d="M312 495 Q384 475 456 495 L456 512 Q384 532 312 512 Z" '
+                'fill="#FFFFFF" stroke="#211A1C" stroke-width="8" stroke-linejoin="round"/>\n'
+                '  <ellipse cx="392" cy="506" rx="40" ry="16" fill="#261D20"/>'
+            )
+            # ---- 嘴巴各形态 ----
+            MOUTH_SMILE = ('<path d="M438 605 Q512 655 586 605" fill="none" '
+                           'stroke="#7B1831" stroke-width="16" stroke-linecap="round"/>')
+            MOUTH_O = ('<ellipse cx="512" cy="628" rx="32" ry="42" fill="url(#mouth)" '
+                       'stroke="#7B1831" stroke-width="8"/>')
+
+            # blink/cheerful 保留原“开心嘴”，只换左眼
+            faces["blink"] = _face(EYE_CLOSED)
+            faces["cheerful"] = _face(EYE_HAPPY)
+            faces["surprised"] = _face(EYE_SURPRISED, MOUTH_O)
+            faces["sleepy"] = _face(EYE_SLEEPY, MOUTH_SMILE)
+
+            # ---- 扩展表情：心形眼(爱)/晕眩眼(转圈)/星星眼(加油) ----
+            EYE_LOVE = (
+                '<path d="M384 548 C360 520 330 500 330 472 C330 452 348 440 364 440 '
+                'C374 440 380 446 384 454 C388 446 394 440 404 440 C420 440 438 452 '
+                '438 472 C438 500 408 520 384 548 Z" fill="#FF5C7A" '
+                'stroke="#D63554" stroke-width="5"/>'
+            )
+            EYE_DIZZY = (
+                '<path d="M348 470 L420 540 M420 470 L348 540" fill="none" '
+                'stroke="#211A1C" stroke-width="16" stroke-linecap="round"/>'
+            )
+            EYE_STAR = (
+                '<path d="M384 448 C392 488 392 488 434 498 C392 508 392 508 384 548 '
+                'C376 508 376 508 334 498 C376 488 376 488 384 448 Z" '
+                'fill="#FFD23F" stroke="#E8A900" stroke-width="4"/>'
+            )
+            faces["love"] = _face(EYE_LOVE)            # 心形眼 + 开心嘴（庆祝）
+            faces["dizzy"] = _face(EYE_DIZZY, MOUTH_O)  # 晕眩眼 + O 嘴（转圈）
+            faces["cheer"] = _face(EYE_STAR)            # 星星眼 + 开心嘴（加油）
+        except Exception:
+            pass
+        return faces
+
+    def showEvent(self, e):
+        """首次显示时关闭 macOS 窗口阴影并让背景完全透明，消除浅色背景下的白色重影。"""
+        super().showEvent(e)
+        _mac_make_window_truly_transparent(self)
+
+    def _body_rect(self):
+        """西瓜本体的判定区（不含给弹跳/手臂/腿预留的透明留白）。
+
+        控件是矩形且比西瓜大一圈，气泡又故意压在右上角，
+        若用整个控件当悬停区，光标停在角落会和气泡反复互相触发 enter/leave。
+        因此只把本体范围（放宽 1px）算作悬停区——必须比气泡的 2px 间隙更小，
+        这样气泡永远落在判定区之外，不会互相触发。"""
+        return QRect(self.PAD_X - 1, self.PAD_TOP - 1,
+                     self.SIZE + 2, self.SIZE + 2)
+
+    def _check_hover(self):
+        """定时轮询光标是否在西瓜本体内，用状态跳变来驱动气泡显隐。
+
+        比 enterEvent/leaveEvent 可靠：既不受「窗口未激活收不到事件」影响，
+        也不会因气泡尺寸变化导致的抖动而重复触发。"""
+        if not self.isVisible():
+            if self._hover_in:
+                self._hover_in = False
+                self._hide_bubble()
+            return
+        if self._drag_pos is not None:
+            return          # 拖动中：不打扰
+        try:
+            inside = self._body_rect().contains(self.mapFromGlobal(QCursor.pos()))
+        except Exception:
+            return
+        if inside == self._hover_in:
+            return          # 状态没变 → 不换台词，杜绝“飞快切换文字”
+        self._hover_in = inside
+        if inside:
+            self._show_bubble()
+        elif not self._forced_bubble_active():
+            # 强提醒/庆祝气泡有自己的定时器，别被鼠标移开顺手关掉
+            self._hide_bubble()
+
+    def enterEvent(self, e):
+        """鼠标移入控件：交由 _check_hover 依据本体判定区决定是否弹气泡。"""
+        self._check_hover()
+        super().enterEvent(e)
+
+    def leaveEvent(self, e):
+        """鼠标移出控件：确保气泡收起。"""
+        if self._hover_in:
+            self._hover_in = False
+            self._hide_bubble()
+        super().leaveEvent(e)
+
+    def _pick_top_task(self):
+        """按“优先级最高 → 截止时间最早”的规则，挑出当前最该做的一条未完成任务。\n\n        对应“最紧急/重要/时间最近”的诉求：优先级 P0<P1<P2<重要<普通，\n        同优先级下按逻辑截止时间（无时间视为当天 23:59）由近及远。只返回一条。\n        """
+        try:
+            tasks = [t for t in self.main.store.tasks if t.get("status") != "done"]
+        except Exception:
+            return None
+        if not tasks:
+            return None
+
+        def key(t):
+            pr = PRIORITY_RANK.get(t.get("priority", "普通"), 99)
+            return (pr, due_sort_key(t.get("due", "")))
+
+        return sorted(tasks, key=key)[0]
+
+    def _build_task_text(self, task):
+        text = (task.get("text") or "").strip()
+        if not text:
+            text = "那条还没起名的待办"
+        return random.choice(_BALL_TASK_TEMPLATES).format(task=text)
+
+    def _show_bubble(self):
+        if getattr(self, "_bubble", None) is None:
+            self._bubble = HoverBubble()
+        # 悬停气泡由鼠标控制显隐：若此前是“强提醒”自动气泡在显示，停掉自动隐藏计时器
+        if getattr(self, "_bubble_hide_timer", None) is not None:
+            self._bubble_hide_timer.stop()
+        # 任务提醒与鼓励语均匀交替：偶数次谈“最该做的任务”，奇数次谈心情。
+        # 若没有未完成任务，则始终说鼓励语。
+        self._ball_toggle = (getattr(self, "_ball_toggle", 0) + 1) % 2
+        task = self._pick_top_task() if self._ball_toggle == 0 else None
+        msg = self._build_task_text(task) if task is not None else random.choice(_BALL_SPEECH)
+        self._bubble.set_text(msg)
+        self._position_bubble()
+
+    def _position_bubble(self):
+        """按西瓜两侧剩余屏幕空间自适应气泡宽度并定位（右侧优先、夹在屏幕内）。"""
+        screen = self.screen()
+        if screen is not None:
+            sg = screen.availableGeometry()
+            right_space = sg.right() - (self.x() + self.PAD_X + self.SIZE + 2)
+            left_space = (self.x() + self.PAD_X - 2) - sg.left()
+            place_right = right_space >= left_space
+            avail = right_space if place_right else left_space
+            # 尽量不换行：最大宽度直接取该侧可用空间（仅设下限），只有当文案真的
+            # 比整侧剩余空间还长时才被迫换行。
+            max_w = max(140, int(avail) - 16)
+        else:
+            place_right, max_w = True, 300
+        self._bubble._label.setMaximumWidth(max_w)
+        self._bubble.adjustSize()
+        bw, bh = self._bubble.width(), self._bubble.height()
+        # 气泡紧贴西瓜本体外沿：横向与本体只留 2px，纵向压到本体顶部上方 2px。
+        # 之所以不能再靠近（不能压到本体上），是因为气泡一旦盖住悬停判定区，
+        # 就会和西瓜互相触发 enter/leave，导致台词疯狂刷新。
+        body_left = self.x() + self.PAD_X
+        body_right = self.x() + self.PAD_X + self.SIZE
+        x = (body_right + 2) if place_right else (body_left - 2 - bw)
+        y = self.y() + self.PAD_TOP - bh - 2
+        if screen is not None:
+            sg = screen.availableGeometry()
+            x = max(sg.left() + 4, min(x, sg.right() - bw - 4))
+            y = max(sg.top() + 4, min(y, sg.bottom() - bh - 4))
+        self._bubble.move(x, y)
+        self._bubble.show()
+        if IS_MAC:
+            _mac_bring_to_front(self._bubble)
+
+    def force_bubble(self, text, ms=6000):
+        """强提醒：用指定文案强制弹出气泡，ms 毫秒后自动消失（不抢微信焦点）。"""
+        self._show_forced_bubble(text, ms)
+        # 强提醒触发时露个惊讶脸 + 蹦一下，吸引注意
+        if "surprised" in self._faces:
+            self._face = "surprised"
+            self._face_left = 2.0
+        if self._hop <= 0:
+            self._hop = 1.0
+
+    def _show_forced_bubble(self, text, ms=6000):
+        """只负责把气泡强行显示并在 ms 毫秒后自动隐藏（不抢焦点），不改表情/动作。"""
+        if getattr(self, "_bubble", None) is None:
+            self._bubble = HoverBubble()
+        self._bubble.set_text(text)
+        self._position_bubble()
+        if getattr(self, "_bubble_hide_timer", None) is None:
+            self._bubble_hide_timer = QTimer(self)
+            self._bubble_hide_timer.setSingleShot(True)
+            self._bubble_hide_timer.timeout.connect(self._hide_bubble)
+        self._bubble_hide_timer.start(max(1000, int(ms)))
+
+    def _celebrate(self, done_today):
+        """完成待办后的庆祝：撒花/爱心 + 庆祝脸 + 弹一句庆祝气泡。"""
+        n = int(done_today) if done_today else 0
+        msg = self._rnd.choice(_BALL_CELEBRATE).format(n=n)
+        self._show_forced_bubble(msg, 5000)
+        face = self._rnd.choice(["love", "cheer"])
+        if face in self._faces:
+            self._face = face
+            self._face_left = 2.5
+        self._emit_burst()
+
+    def _emit_burst(self):
+        """庆祝爆发：混合撒出花瓣/星星/爱心粒子。"""
+        import math as _m
+        cx = self.W / 2.0
+        cy = self.PAD_TOP + self.SIZE / 2.0
+        for _ in range(14):
+            ang = self._rnd.uniform(0, 2 * _m.pi)
+            spd = self._rnd.uniform(40, 110)
+            kind = self._rnd.choice(["petal", "star", "heart"])
+            self._particles.append({
+                "x": cx, "y": cy,
+                "vx": _m.cos(ang) * spd,
+                "vy": _m.sin(ang) * spd - 60,   # 略向上
+                "g": 80.0,                       # 重力
+                "life": self._rnd.uniform(0.9, 1.6),
+                "max": 1.6,
+                "size": self._rnd.uniform(5, 9),
+                "rot": self._rnd.uniform(0, 360),
+                "vr": self._rnd.uniform(-220, 220),
+                "kind": kind,
+            })
+
+    def _forced_bubble_active(self):
+        """是否正有一条强提醒/庆祝气泡在自动倒计时显示中。"""
+        tmr = getattr(self, "_bubble_hide_timer", None)
+        return tmr is not None and tmr.isActive()
+
+    def _hide_bubble(self):
+        if getattr(self, "_bubble", None) is not None:
+            self._bubble.hide()
 
     def _current_speed(self):
         """根据未完成待办数量算出跑动速度倍率：待办越多跑越快（有上下限）。
@@ -1634,17 +2818,24 @@ class FloatingBall(QWidget):
         if self._speed_tick >= 20 or not hasattr(self, "_speed"):
             self._speed_tick = 0
             self._speed = self._current_speed()
-        # 每约 2 秒（60 帧）把悬浮窗重新提到最顶层：Qt 的 WindowStaysOnTopHint
-        # 会被其它同样置顶的窗口（全屏程序、部分输入法/播放器）盖住，需周期性 raise
+        # 每约 2 秒（60 帧）维护一次置顶状态。
+        # 关键修复：macOS 上**绝不**调用会激活本 App 的 QWidget.raise_()
+        # （raise_() 会把本 App 提到前台，周期性抢走微信等 App 的键盘/输入法焦点，
+        # 导致“有悬浮小西瓜就微信打字失调”）。macOS 分支改为空操作，仅依赖
+        # WindowStaysOnTopHint 保持置顶；其它平台保留原 raise_()。
         self._top_tick = getattr(self, "_top_tick", 0) + 1
         if self._top_tick >= 60:
             self._top_tick = 0
             try:
-                self.raise_()
+                if IS_MAC:
+                    _mac_bring_to_front(self)  # 当前为安全空操作
+                else:
+                    self.raise_()
             except Exception:
                 pass
         # 走路计时：速度越快，时间推进越快 → 步频/弹跳都更快
-        self._t += 0.03 * self._speed
+        dt = 0.03
+        self._t += dt * self._speed
         # 随机眨眼：正在眨则递减，否则按概率触发一次眨眼
         if self._blinking > 0:
             self._blinking -= 0.08
@@ -1653,14 +2844,82 @@ class FloatingBall(QWidget):
         else:
             if self._rnd.random() < 0.012:
                 self._blinking = 1.0
+
+        # ---- 动作：偶尔蹦跳一下（跑得快时更爱蹦）----
+        if self._hop > 0:
+            self._hop = max(0.0, self._hop - 0.06)
+        elif self._rnd.random() < 0.004 * (0.6 + 0.8 * (self._speed - 0.5)):
+            self._hop = 1.0
+        # ---- 动作：偶尔 3D 转身（绕竖直轴转一圈，非 2D 翻跟头；悠闲时爱臭美）----
+        if self._turn > 0:
+            self._turn -= dt
+        elif self._speed <= 0.7 and self._rnd.random() < 0.0015:
+            self._turn = self._turn_dur
+        # ---- 粒子更新（花瓣/星星/爱心）----
+        if self._particles:
+            alive = []
+            for pt in self._particles:
+                pt["x"] += pt["vx"] * dt
+                pt["y"] += pt["vy"] * dt
+                pt["vy"] += pt["g"] * dt
+                pt["rot"] += pt["vr"] * dt
+                pt["life"] -= dt
+                if pt["life"] > 0:
+                    alive.append(pt)
+            self._particles = alive
+        # ---- 庆祝轮询：每约 2 秒查一次“今日已完成”，增多则庆祝 ----
+        if self._celeb_cooldown > 0:
+            self._celeb_cooldown -= dt
+        self._stat_tick += 1
+        if self._stat_tick >= 60:
+            self._stat_tick = 0
+            try:
+                _done = self.main.store.stats()[1]
+            except Exception:
+                _done = None
+            if _done is not None:
+                if self._done_today is None:
+                    self._done_today = _done
+                elif _done > self._done_today and self._celeb_cooldown <= 0:
+                    self._celebrate(_done)
+                    self._celeb_cooldown = 8.0
+                self._done_today = _done
+
+        # ---- 表情调度：眨眼 > 庆祝/心情 > 常态 ----
+        if self._blinking > 0.35 and "blink" in self._faces:
+            self._face = "blink"
+        elif self._face_left > 0:
+            self._face_left -= dt
+            if self._face_left <= 0:
+                self._face = "normal"
+        else:
+            if self._rnd.random() < 0.006:
+                if self._speed <= 0.6:        # 悠闲：犯困/满足
+                    self._face = self._rnd.choice(["sleepy", "cheerful"])
+                elif self._speed >= 1.3:      # 忙碌：惊讶/打鸡血
+                    self._face = self._rnd.choice(["surprised", "cheerful"])
+                else:
+                    self._face = self._rnd.choice(["cheerful", "surprised"])
+                if self._face not in self._faces:
+                    self._face = "normal"
+                else:
+                    self._face_left = self._rnd.uniform(1.6, 3.0)
+            else:
+                self._face = "normal"
         self.update()
 
     def paintEvent(self, e):
         import math
         from PySide6.QtGui import (QPainter, QColor, QFont, QPen, QBrush,
-                                   QPainterPath)
+                                   QPainterPath, QPixmap)
         from PySide6.QtCore import QPointF, QRectF
-        p = QPainter(self)
+        # 离屏缓冲：每帧在全新、绝对干净的透明 pixmap 上绘制，再用 Source 模式整体
+        # 替换到窗口（透明区也会一并覆盖窗口旧像素），彻底消除 macOS 上的白色残影/重影。
+        _dpr = self.devicePixelRatioF() if hasattr(self, "devicePixelRatioF") else 1.0
+        _off = QPixmap(int(self.width() * _dpr), int(self.height() * _dpr))
+        _off.setDevicePixelRatio(_dpr)
+        _off.fill(QColor(0, 0, 0, 0))
+        p = QPainter(_off)
         p.setRenderHint(QPainter.Antialiasing, True)
         p.setRenderHint(QPainter.SmoothPixmapTransform, True)
 
@@ -1676,6 +2935,8 @@ class FloatingBall(QWidget):
         walk = math.sin(self._t * 5.0)          # -1..1
         swing = walk * (5.0 + vigor * 4.0)       # 身体左右摆动角度（度）：越快摆越大
         bob = abs(math.sin(self._t * 5.0)) * (2.0 + vigor * 4.0)  # 上下弹跳：越快颠得越高
+        # 蹦跳：触发后能量衰减，叠加一记更高的起跳
+        bob += self._hop * (s * 0.22)
 
         # ===== 依据 watermelon_ball.svg 真实几何（viewBox 1024，三角形西瓜）=====
         # 顶点(512,100)；底边圆弧 Q512 888 813 827，最低点在正中央(512,888)；
@@ -1705,11 +2966,22 @@ class FloatingBall(QWidget):
         p.translate(pivot_x, pivot_y - bob)   # 弹跳
         p.rotate(swing)                        # 走路左右摇摆
         p.translate(-pivot_x, -pivot_y)
+        # 3D 转身：绕竖直轴转一圈——用水平方向 cos 收缩(1→0→-1→0→1)模拟立体转身，
+        # 正→侧→背(镜像)→侧→正，绝非 2D 翻跟头；腿和身体一起转，保持整体感。
+        if self._turn > 0:
+            prog = 1.0 - max(0.0, min(1.0, self._turn / self._turn_dur))
+            turn_sx = math.cos(prog * 2.0 * math.pi)   # 1→0→-1→0→1
+            if abs(turn_sx) < 0.06:                     # 侧脸时保留一条薄边，更“立体”
+                turn_sx = 0.06 if turn_sx >= 0 else -0.06
+            bcx = body_x + s / 2.0
+            bcy = body_y + s / 2.0
+            p.translate(bcx, bcy)
+            p.scale(turn_sx, 1.0)
+            p.translate(-bcx, -bcy)
 
-        # ---- 画西瓜本体（眨眼时整脸切换到闭眼版 pixmap，颜色纹路一致不脱离）----
+        # ---- 画西瓜本体（按当前表情 _face 切换整脸位图，颜色纹路一致不脱离）----
         target = QRectF(body_x, body_y, s, s)
-        blinking_now = (self._blinking > 0.35) and (self._pixmap_blink is not None)
-        face_pm = self._pixmap_blink if blinking_now else self._pixmap
+        face_pm = self._faces.get(self._face) or self._faces.get("normal") or self._pixmap
         if face_pm is not None:
             p.drawPixmap(target, face_pm, QRectF(face_pm.rect()))
         else:
@@ -1719,8 +2991,8 @@ class FloatingBall(QWidget):
             p.setPen(QColor("#000000"))
             p.drawText(target, Qt.AlignCenter, "🍉")
 
-        # ---- 两条腿：朝同一方向（向右）行走，一前一后交替迈步 ----
-        DIR = -1                                  # 行进方向：+1 向右，-1 向左
+        # ---- 两条腿：朝当前行进方向行走，一前一后交替迈步 ----
+        DIR = self._dir                              # 行进方向：+1 向右，-1 向左（定时翻转）
         leg_len = s * 0.10
         for i, sign in enumerate((-1, 1)):
             hip_x = sx(512.0 + sign * 62.0)       # 两腿根靠中央
@@ -1751,6 +3023,50 @@ class FloatingBall(QWidget):
         # ---- 眨眼由本体 pixmap 整脸切换实现（见上方 face_pm），此处无需再叠加 ----
 
         p.restore()
+        # ---- 粒子（花瓣/星星/爱心），在窗口坐标系内独立飘浮 ----
+        if self._particles:
+            self._draw_particles(p)
+        p.end()
+        # 离屏结果整体替换到窗口（Source 模式：透明区也会覆盖窗口旧像素，杜绝残影）
+        _wp = QPainter(self)
+        _wp.setCompositionMode(QPainter.CompositionMode_Source)
+        _wp.drawPixmap(0, 0, _off)
+        _wp.end()
+
+    def _draw_particles(self, p):
+        """绘制花瓣/星星/爱心粒子（带淡出）。"""
+        from PySide6.QtGui import QColor, QBrush, QPainterPath
+        from PySide6.QtCore import QPointF
+        for pt in self._particles:
+            a = max(0.0, min(1.0, pt["life"] / pt["max"]))
+            sz = pt["size"]
+            p.save()
+            p.translate(pt["x"], pt["y"])
+            p.rotate(pt["rot"])
+            kind = pt["kind"]
+            if kind == "petal":
+                c = QColor("#FFC2D1"); c.setAlpha(int(255 * a))
+                p.setBrush(QBrush(c)); p.setPen(Qt.NoPen)
+                p.drawEllipse(QPointF(0, 0), sz, sz * 0.6)
+            elif kind == "star":
+                path = QPainterPath()
+                path.moveTo(0, -sz)
+                path.cubicTo(sz * 0.25, -sz * 0.25, sz * 0.25, -sz * 0.25, sz, 0)
+                path.cubicTo(sz * 0.25, sz * 0.25, sz * 0.25, sz * 0.25, 0, sz)
+                path.cubicTo(-sz * 0.25, sz * 0.25, -sz * 0.25, sz * 0.25, -sz, 0)
+                path.cubicTo(-sz * 0.25, -sz * 0.25, -sz * 0.25, -sz * 0.25, 0, -sz)
+                c = QColor("#FFD23F"); c.setAlpha(int(255 * a))
+                p.setBrush(QBrush(c)); p.setPen(Qt.NoPen)
+                p.drawPath(path)
+            else:  # heart
+                path = QPainterPath()
+                path.moveTo(0, sz * 0.6)
+                path.cubicTo(-sz * 1.1, -sz * 0.1, -sz * 0.5, -sz * 0.9, 0, -sz * 0.3)
+                path.cubicTo(sz * 0.5, -sz * 0.9, sz * 1.1, -sz * 0.1, 0, sz * 0.6)
+                c = QColor("#FF5C7A"); c.setAlpha(int(255 * a))
+                p.setBrush(QBrush(c)); p.setPen(Qt.NoPen)
+                p.drawPath(path)
+            p.restore()
 
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
@@ -1769,6 +3085,15 @@ class FloatingBall(QWidget):
             if not self._moved:
                 # 纯单击（未拖动）→ 唤起主界面
                 self.main.summon_to_front()
+                # 唤起后主窗口 raise_() 会盖住置顶的小西瓜，这里把西瓜再提到最前
+                # （_mac_bring_to_front 不抢前台 App 焦点；非 mac 用 raise_）
+                try:
+                    if IS_MAC:
+                        _mac_bring_to_front(self)
+                    else:
+                        self.raise_()
+                except Exception:
+                    pass
             else:
                 # 拖动结束：记住位置
                 try:
@@ -1813,6 +3138,19 @@ class TodoWidget(QWidget):
         super().__init__()
         self.store = Store()
         self.cfg = load_config()
+        # 注入持久化的自定义主题（DIY 配色，可多套具名），使启动时能直接恢复
+        _cts = self.cfg.get("custom_themes")
+        if not isinstance(_cts, dict):
+            _cts = {}
+        _old = self.cfg.get("custom_theme")  # 兼容旧版单套「自定义」
+        if isinstance(_old, dict) and _old and "自定义" not in _cts:
+            _cts["自定义"] = _old
+        self.cfg["custom_themes"] = _cts
+        for _nm, _th in _cts.items():
+            if isinstance(_th, dict) and _th:
+                THEMES[_nm] = _th
+                if _nm not in THEME_ORDER:
+                    THEME_ORDER.append(_nm)
         self.theme_name = self.cfg.get("theme", "极光白")
         if self.theme_name not in THEMES:
             self.theme_name = "极光白"
@@ -3590,6 +4928,7 @@ class TodoWidget(QWidget):
                 card.pinned.connect(self._on_pin)
                 card.sub_toggled.connect(self._on_sub_toggle)
                 card.select_toggled.connect(self._on_card_select)
+                card.configure_strong.connect(self._on_configure_strong)
                 self.list_lay.insertWidget(i, card)
                 if animate:
                     self._fade_in(card, i)
@@ -3993,6 +5332,17 @@ class TodoWidget(QWidget):
         self.store.update(tid, pinned=not cur)
         self.refresh(animate=False)
 
+    def _on_configure_strong(self, tid):
+        """打开强提醒设置窗口；确认后写回任务 strong 字段并保存。"""
+        task = next((t for t in self.store.tasks if t["id"] == tid), None)
+        if task is None:
+            return
+        dlg = StrongRemindDialog(self.theme, task, self)
+        if dlg.exec():
+            # 对话框 accept() 已把设置写入 task["strong"]（同一对象引用）
+            self.store.save()
+            self.refresh(animate=False)
+
     def _on_delete(self, tid):
         self.store.delete(tid)
         # 只移除对应卡片并让下方待办平滑上移，避免整表重建导致的闪烁
@@ -4395,7 +5745,7 @@ class TodoWidget(QWidget):
 
     # -- 主题 --
     def _pick_theme(self):
-        """弹出主题选择列表，勾选当前主题"""
+        """简略主题菜单：快速切换 + 「主题商店与DIY」入口跳弹窗。"""
         m = QMenu(self)
         m.addAction("选择主题").setEnabled(False)
         m.addSeparator()
@@ -4405,15 +5755,41 @@ class TodoWidget(QWidget):
             act.setChecked(name == self.theme_name)
             act.triggered.connect(lambda checked=False, n=name: self._set_theme(n))
         m.addSeparator()
+        store = m.addAction("🎨  主题商店与 DIY…")
+        store.triggered.connect(self._open_theme_market)
+        m.addSeparator()
         m.addAction("背景图片").setEnabled(False)
         pic = m.addAction("上传背景图片…")
         pic.triggered.connect(self._pick_bg_image)
         if self.cfg.get("bg_image"):
             clr_pic = m.addAction("清除背景图片")
             clr_pic.triggered.connect(self._clear_bg_image)
-        # 菜单弹在主题按钮下方
         pos = self.btn_theme.mapToGlobal(self.btn_theme.rect().bottomLeft())
         m.exec(pos)
+
+    def _open_theme_market(self):
+        """打开主题商店弹窗（卡片网格预览 + DIY 配色）。
+
+        悬浮小西瓜是置顶窗口，会盖住模态弹窗（正好压在按钮上时点不动），
+        所以打开商店期间暂时藏起小西瓜，关闭后恢复。"""
+        ball = getattr(self, "floating_ball", None)
+        ball_was_visible = ball is not None and ball.isVisible()
+        if ball_was_visible:
+            ball.hide()
+        try:
+            dlg = ThemeMarketDialog(self, self)
+            dlg.exec()
+        finally:
+            ball = getattr(self, "floating_ball", None)
+            if ball_was_visible and ball is not None:
+                ball.show()
+                try:
+                    if IS_MAC:
+                        _mac_bring_to_front(ball)
+                    else:
+                        ball.raise_()
+                except Exception:
+                    pass
 
     # -- 自定义图片背景 --
     def _load_bg_image(self):
@@ -4455,6 +5831,14 @@ class TodoWidget(QWidget):
         self.refresh()
         self.update()
         self._save_cfg()
+
+    def _preview_theme(self, theme):
+        """临时把一套配色套到主窗口上（不改 theme_name、不落盘）。
+        DIY 配色弹窗的实时预览用；取消时再用原配色调用一次即可还原。"""
+        self.theme = theme
+        self._apply_window_style()
+        self.refresh()
+        self.update()
 
     def _show_menu(self):
         m = QMenu(self)
@@ -4654,7 +6038,14 @@ class TodoWidget(QWidget):
         if getattr(self, "floating_ball", None) is None:
             self.floating_ball = FloatingBall(self)
         self.floating_ball.show()
-        self.floating_ball.raise_()
+        # macOS 上用 orderFrontRegardless 把悬浮球顶到最前且浮在主窗口之上，
+        # 但绝不激活本 App（不影响微信等前台 App 焦点）；延迟一帧确保主窗口
+        # show 之后悬浮球仍在最前，避免被主窗口遮挡导致“桌面上看不到西瓜”。
+        if IS_MAC:
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, lambda: _mac_bring_to_front(self.floating_ball))
+        else:
+            self.floating_ball.raise_()
 
     def _hide_floating_ball(self):
         if getattr(self, "floating_ball", None) is not None:
@@ -4784,6 +6175,53 @@ class TodoWidget(QWidget):
                 log.append("due")
                 t["notified"] = True
                 changed = True
+
+        # === 强提醒 ===
+        # 规则：任务未做完、且开启了强提醒，则在“截止前 N 单位 ~ 截止”时间窗内，
+        # 每隔“每 M 单位”弹出一次（居中强提醒弹窗 + 可选悬浮小西瓜浮窗），
+        # 受“最多 N 次”上限约束。非阻塞，避免卡住提醒检查循环。
+        for t in self.store.tasks:
+            if t["status"] == "done":
+                continue
+            s = t.get("strong") or _default_strong()
+            if not s.get("enabled"):
+                continue
+            due = t.get("due", "")
+            due_dt = due_datetime(due) if due else None
+            if due_dt is None:
+                continue
+            # 起始时刻：截止前 before_value 单位；before=0 表示“从现在起就提醒”
+            if int(s.get("before_value", 1)) <= 0:
+                start_dt = datetime.datetime.min
+            else:
+                start_dt = due_dt - datetime.timedelta(
+                    seconds=_strong_seconds(s["before_value"], s["before_unit"]))
+            if now < start_dt or now >= due_dt:
+                continue
+            interval_sec = _strong_seconds(s["interval_value"], s["interval_unit"])
+            last_dt = None
+            if s.get("last"):
+                try:
+                    last_dt = datetime.datetime.fromisoformat(s["last"])
+                except Exception:
+                    last_dt = None
+            if last_dt is not None and (now - last_dt).total_seconds() < interval_sec:
+                continue  # 还没到下一次提醒
+            max_count = int(s.get("max_count", 0) or 0)
+            if max_count > 0 and int(s.get("count", 0)) >= max_count:
+                continue  # 已达次数上限
+            text = (t.get("text") or "").strip() or "未命名待办"
+            # 可选：悬浮小西瓜浮窗提醒
+            if s.get("float_window") and getattr(self, "floating_ball", None) is not None:
+                self.floating_ball.force_bubble("记得" + text + "哦～", ms=6000)
+            # 居中强提醒弹窗（非阻塞，8 秒后自动关闭）
+            dlg = ReminderPopup(self.theme, text, "强提醒", due=due, urgent=True, parent=self)
+            dlg.show()
+            QTimer.singleShot(8000, dlg.close)
+            s["last"] = now.isoformat(timespec="seconds")
+            s["count"] = int(s.get("count", 0)) + 1
+            changed = True
+
         if changed:
             self.store.save()
 

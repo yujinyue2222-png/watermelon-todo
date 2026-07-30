@@ -5890,13 +5890,9 @@ class TodoWidget(QWidget):
     def _real_quit(self):
         """彻底退出程序（不再驻留后台）"""
         from PySide6.QtWidgets import QApplication
+        self._exiting = True
         self._save_cfg()
-        try:
-            if getattr(self, "floating_ball", None) is not None:
-                self.floating_ball.close()
-                self.floating_ball = None
-        except Exception:
-            pass
+        self._cleanup_before_quit()
         QApplication.quit()
 
     def _hotkey_label(self):
@@ -6116,12 +6112,8 @@ class TodoWidget(QWidget):
             self.summon_to_front()
 
     def _quit_from_tray(self):
-        """从托盘菜单彻底退出：先移除托盘图标，再走正常关闭流程。"""
-        try:
-            if getattr(self, "tray", None) is not None:
-                self.tray.hide()
-        except Exception:
-            pass
+        """从托盘菜单彻底退出。"""
+        self._exiting = True
         self.close()
 
     def _toggle_topmost(self):
@@ -6262,8 +6254,8 @@ class TodoWidget(QWidget):
         self.cfg["collapsed"] = self.collapsed
         save_config(self.cfg)
 
-    def closeEvent(self, e):
-        self._save_cfg()
+    def _cleanup_before_quit(self):
+        """彻底退出前释放后台资源：托盘、悬浮球、单实例锁、全局热键。"""
         # 移除托盘图标，避免退出后残留
         try:
             if getattr(self, "tray", None) is not None:
@@ -6278,7 +6270,7 @@ class TodoWidget(QWidget):
                 self.floating_ball = None
         except Exception:
             pass
-        # 彻底退出：释放单实例锁 + 注销全局热键，避免进程残留导致下次打不开
+        # 释放单实例锁 + 注销全局热键，避免进程残留导致下次打不开
         try:
             global _single_server
             if _single_server is not None:
@@ -6288,8 +6280,17 @@ class TodoWidget(QWidget):
         except Exception:
             pass
         _unregister_global_hotkey(self)
-        super().closeEvent(e)
-        QApplication.quit()
+
+    def closeEvent(self, e):
+        if getattr(self, "_exiting", False):
+            # 真正退出：释放后台资源后允许窗口关闭
+            self._cleanup_before_quit()
+            super().closeEvent(e)
+            return
+        # 点红点关闭 = 缩到托盘（不真正退出，进程继续驻留后台）
+        self._save_cfg()
+        e.ignore()
+        self.hide()
 
 
 # ----------------------------------------------------------------------------
@@ -6599,7 +6600,7 @@ def main():
     logo_path = _resource_path("watermelon_logo.svg")
     if logo_path.exists():
         app.setWindowIcon(QIcon(str(logo_path)))
-    app.setQuitOnLastWindowClosed(True)
+    app.setQuitOnLastWindowClosed(False)  # 点红点关闭 = 缩到托盘，不自动退出
     # 单实例检测：用 QLocalServer/QLocalSocket。相比 QSharedMemory，它能可靠区分
     # “真有实例在运行”（能连上 server）和“上次异常退出的残留”（连不上则移除陈旧 server 重建），
     # 避免残留导致程序永远打不开。
@@ -6638,6 +6639,13 @@ def main():
         pass
     w = TodoWidget()
     w.show()
+    # macOS 修复：点 dock 图标只是把 App 激活，不会自动把被隐藏的 Qt 主窗口 show 出来
+    # （Qt 未实现 macOS 的“重新打开”处理器）。在 App 变为激活态、且主窗口不可见时，
+    # 主动召回到前台，使 dock 点击与托盘/悬浮球单击行为一致。
+    app.applicationStateChanged.connect(
+        lambda st: w.summon_to_front()
+        if st == Qt.ApplicationActive and not w.isVisible() else None
+    )
     # 当再次启动本程序时，新实例会连上来发 "show"，这里收到后把窗口召回前台
     def _on_new_connection():
         try:

@@ -339,6 +339,11 @@ jobs:
         with:
           name: mac
           path: dist
+      - name: 删除同名旧 Release（保留 tag，避免资产已存在冲突）
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete "${{ github.ref_name }}" --repo "${{ github.repository }}" --yes || echo "无旧 Release，跳过"
       - name: 创建下载页并挂上安装包
         uses: softprops/action-gh-release@v2
         with:

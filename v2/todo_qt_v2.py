@@ -2473,7 +2473,6 @@ class FloatingBall(QWidget):
         self.setToolTip("西瓜todo · 点击打开 / 右键退出")
         # 悬停气泡防抖：进入西瓜本体才弹，且同一次悬停内不重复换台词
         self._hover_in = False        # 当前光标是否在“西瓜本体”判定区内
-        self._ball_shifted_x = None   # 为给右侧气泡腾位置而临时左移前的原 x（None=未移位）
         self._hover_poll = QTimer(self)
         self._hover_poll.setInterval(120)
         self._hover_poll.timeout.connect(self._check_hover)
@@ -2706,33 +2705,29 @@ class FloatingBall(QWidget):
         self._position_bubble()
 
     def _position_bubble(self):
-        """气泡始终从西瓜右上方“冒出”（macOS / Windows 完全一致，默认都在右边）。
+        """气泡【永远】从西瓜右上方冒出，macOS / Windows 完全一致，绝不强翻到左侧。
 
-        为保证消息一定在西瓜右侧：若西瓜此刻贴着屏幕右缘、右侧放不下整条气泡，
-        则【临时】把西瓜左移腾出空间（气泡收起后再复位，不改变你平时的停靠位置），
-        绝不强翻到左侧。仅当左移到屏幕左缘仍放不下（极小屏）时，才兜底翻到左侧
-        避免文字被截断。
+        规则（简单、无平台差异、不移动西瓜本体）：
+        - 始终放在西瓜本体右侧（body_right + 2）。
+        - 不采用“哪边空间大放哪边”的自适应，也不临时挪动西瓜去腾位置。
+        - 只有当西瓜贴着屏幕右缘、气泡右侧会顶出屏幕时，才把气泡右缘贴住屏幕右缘
+          往左收一点——气泡仍在西瓜右上方，绝不翻到西瓜左边。
+        - 找屏幕用“西瓜中心点在哪块屏”(QApplication.screenAt)，避免 Windows 上
+          Qt.Tool 无边框窗口 self.screen() 返回错误屏幕导致的左右判定差异。
         """
-        screen = self.screen()
+        # 跨平台稳健地定位西瓜真实所在屏幕：Windows 上无边框/Qt.Tool 窗口的
+        # self.screen() 可能返回 None 或错误屏幕，会让“右侧空间”算错、气泡误翻左。
+        # 改用西瓜中心点落在哪块屏来判定，杜绝系统差异。
+        screen = QApplication.screenAt(self.geometry().center())
+        if screen is None:
+            screen = self.screen()
+        if screen is None:
+            screen = QApplication.primaryScreen()
         sg = screen.availableGeometry() if screen is not None else None
-        # 1) 先按“未移位”的西瓜位置估算气泡宽度，若右侧放不下则临时左移西瓜
-        if sg is not None and self._ball_shifted_x is None:
-            body_right0 = self.x() + self.PAD_X + self.SIZE
-            est_right = sg.right() - (body_right0 + 2)
-            est_w = max(140, min(300, int(est_right) - 16))
-            self._bubble._label.setMaximumWidth(est_w)
-            self._bubble.adjustSize()
-            bw0 = self._bubble.width()
-            overflow = (body_right0 + 2 + bw0) - (sg.right() - 4)
-            if overflow > 0:
-                max_shift = self.x() - (sg.left() + 4)
-                shift = min(overflow + 6, max_shift)
-                if shift > 0:
-                    self._ball_shifted_x = self.x()
-                    self.move(self.x() - shift, self.y())
-        # 2) 以（可能已左移的）西瓜位置计算本体坐标与右侧可用空间
-        body_left = self.x() + self.PAD_X
+
         body_right = self.x() + self.PAD_X + self.SIZE
+
+        # 用“右侧可用空间”作宽度上限量出气泡真实尺寸（文字短则窄、长则换行）
         if sg is not None:
             right_space = sg.right() - (body_right + 2)
             max_w = max(140, int(right_space) - 16)
@@ -2741,19 +2736,13 @@ class FloatingBall(QWidget):
         self._bubble._label.setMaximumWidth(max_w)
         self._bubble.adjustSize()
         bw, bh = self._bubble.width(), self._bubble.height()
-        # 3) 正常情况下放右侧；仅当左移到底仍放不下（极小屏）才兜底翻到左侧
-        place_right = True
-        if sg is not None and body_right + 2 + bw > sg.right() - 4:
-            place_right = False
-            left_space = (body_left - 2) - sg.left()
-            if bw > left_space - 4:
-                self._bubble._label.setMaximumWidth(max(140, int(left_space) - 16))
-                self._bubble.adjustSize()
-                bw, bh = self._bubble.width(), self._bubble.height()
-        # 气泡紧贴西瓜本体外沿：横向与本体只留 2px，纵向压到本体顶部上方 2px。
-        # 之所以不能再靠近（不能压到本体上），是因为气泡一旦盖住悬停判定区，
-        # 就会和西瓜互相触发 enter/leave，导致台词疯狂刷新。
-        x = (body_right + 2) if place_right else (body_left - 2 - bw)
+
+        # 默认放右侧：紧贴西瓜本体外沿右 2px（不会盖住本体，不触发 enter/leave 抖动）
+        x = body_right + 2
+        # 若会顶出屏幕右缘（西瓜贴右边缘时），把气泡右缘贴屏幕右缘往左收，仍在右侧
+        if sg is not None and x + bw > sg.right() - 4:
+            x = sg.right() - 4 - bw
+        # 纵向压到本体顶部上方 2px（盖住本体才会触发 enter/leave 抖动，故不压本体）
         y = self.y() + self.PAD_TOP - bh - 2
         if sg is not None:
             x = max(sg.left() + 4, min(x, sg.right() - bw - 4))
@@ -2826,10 +2815,6 @@ class FloatingBall(QWidget):
     def _hide_bubble(self):
         if getattr(self, "_bubble", None) is not None:
             self._bubble.hide()
-        # 气泡收起：若此前为腾出右侧空间临时左移过西瓜，复位到原位置（恢复停靠点）
-        if getattr(self, "_ball_shifted_x", None) is not None:
-            self.move(self._ball_shifted_x, self.y())
-            self._ball_shifted_x = None
 
     def _current_speed(self):
         """根据未完成待办数量算出跑动速度倍率：待办越多跑越快（有上下限）。
@@ -3134,9 +3119,6 @@ class FloatingBall(QWidget):
                     save_config(self.main.cfg)
                 except Exception:
                     pass
-                # 若此前为腾气泡临时左移过西瓜，用户主动拖到了新位置：丢弃旧原位，
-                # 避免气泡收起时又把西瓜拽回原处（等于撤销本次拖拽）
-                self._ball_shifted_x = None
             self._drag_pos = None
             e.accept()
 

@@ -2418,12 +2418,14 @@ class HoverBubble(QWidget):
         self.setAttribute(Qt.WA_TransparentForMouseEvents)  # 鼠标穿透，不影响西瓜的 hover 检测
         self._label = QLabel("", self)
         self._label.setWordWrap(True)
-        self._label.setMaximumWidth(220)
+        # 舒适阅读宽度：约 15~16 个中文/行；由 _position_bubble 在贴右缘时才临时收窄
+        self._label.setMaximumWidth(240)
         self._label.setStyleSheet(
-            "QLabel{color:#2b2b2b;font:13px 'PingFang SC','Microsoft YaHei',sans-serif;}"
+            "QLabel{color:#2b2b2b;"
+            "font:14px/1.5 'PingFang SC','Microsoft YaHei',sans-serif;}"
         )
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(14, 10, 14, 10)
+        lay.setContentsMargins(15, 11, 15, 11)
         lay.addWidget(self._label)
         self.adjustSize()
 
@@ -2727,12 +2729,14 @@ class FloatingBall(QWidget):
 
         body_right = self.x() + self.PAD_X + self.SIZE
 
-        # 用“右侧可用空间”作宽度上限量出气泡真实尺寸（文字短则窄、长则换行）
+        # 宽度上限：固定舒适阅读宽度 240px（约 15~16 中文/行），排版稳定不随位置抖动。
+        # 只有当西瓜贴屏幕右缘、右侧空间不足时，才临时收窄（下限 180px）保证不顶出屏幕。
+        PREF_W = 240
         if sg is not None:
-            right_space = sg.right() - (body_right + 2)
-            max_w = max(140, int(right_space) - 16)
+            right_space = sg.right() - (body_right + 2) - 16
+            max_w = max(180, min(PREF_W, int(right_space)))
         else:
-            max_w = 300
+            max_w = PREF_W
         self._bubble._label.setMaximumWidth(max_w)
         self._bubble.adjustSize()
         bw, bh = self._bubble.width(), self._bubble.height()

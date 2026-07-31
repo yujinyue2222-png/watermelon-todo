@@ -2705,31 +2705,41 @@ class FloatingBall(QWidget):
         self._position_bubble()
 
     def _position_bubble(self):
-        """按西瓜两侧剩余屏幕空间自适应气泡宽度并定位（右侧优先、夹在屏幕内）。"""
+        """气泡默认从西瓜右上方“冒出”（与 macOS 行为一致），Windows 也保持同一侧。
+
+        优先级：优先放右侧；只有当西瓜贴着屏幕右缘、右侧实在放不下整条气泡时，
+        才退到左侧兜底。这样无论 macOS / Windows，消息默认都在西瓜右边，两端一致。
+        """
         screen = self.screen()
-        if screen is not None:
-            sg = screen.availableGeometry()
-            right_space = sg.right() - (self.x() + self.PAD_X + self.SIZE + 2)
-            left_space = (self.x() + self.PAD_X - 2) - sg.left()
-            place_right = right_space >= left_space
-            avail = right_space if place_right else left_space
-            # 尽量不换行：最大宽度直接取该侧可用空间（仅设下限），只有当文案真的
-            # 比整侧剩余空间还长时才被迫换行。
-            max_w = max(140, int(avail) - 16)
+        sg = screen.availableGeometry() if screen is not None else None
+        body_left = self.x() + self.PAD_X
+        body_right = self.x() + self.PAD_X + self.SIZE
+        # 先按右侧空间给一个较宽上限，量出气泡真实尺寸（基于右侧最大宽度）
+        if sg is not None:
+            right_space = sg.right() - (body_right + 2)
+            max_w = max(140, int(right_space) - 16)
         else:
-            place_right, max_w = True, 300
+            max_w = 300
         self._bubble._label.setMaximumWidth(max_w)
         self._bubble.adjustSize()
         bw, bh = self._bubble.width(), self._bubble.height()
+        # 优先右侧；仅当右侧放不下整条气泡（会超出屏幕右缘）才翻到左侧
+        place_right = True
+        if sg is not None and body_right + 2 + bw > sg.right() - 4:
+            place_right = False
+            # 翻到左侧后，若气泡比左侧剩余空间还宽，按左侧空间重设宽度再量一次
+            left_space = (body_left - 2) - sg.left()
+            if bw > left_space - 4:
+                max_w = max(140, int(left_space) - 16)
+                self._bubble._label.setMaximumWidth(max_w)
+                self._bubble.adjustSize()
+                bw, bh = self._bubble.width(), self._bubble.height()
         # 气泡紧贴西瓜本体外沿：横向与本体只留 2px，纵向压到本体顶部上方 2px。
         # 之所以不能再靠近（不能压到本体上），是因为气泡一旦盖住悬停判定区，
         # 就会和西瓜互相触发 enter/leave，导致台词疯狂刷新。
-        body_left = self.x() + self.PAD_X
-        body_right = self.x() + self.PAD_X + self.SIZE
         x = (body_right + 2) if place_right else (body_left - 2 - bw)
         y = self.y() + self.PAD_TOP - bh - 2
-        if screen is not None:
-            sg = screen.availableGeometry()
+        if sg is not None:
             x = max(sg.left() + 4, min(x, sg.right() - bw - 4))
             y = max(sg.top() + 4, min(y, sg.bottom() - bh - 4))
         self._bubble.move(x, y)

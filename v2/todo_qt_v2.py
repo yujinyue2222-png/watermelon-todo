@@ -35,7 +35,7 @@
                       修复：去掉导出/管理项目/编辑待办弹窗内与标题栏重复的大标题
 """
 
-APP_VERSION = "3.0"
+APP_VERSION = "3.7"
 # 检查更新用：GitHub 仓库最新 Release 接口 + 下载页地址
 UPDATE_API = "https://api.github.com/repos/yujinyue2222-png/watermelon-todo/releases/latest"
 RELEASE_PAGE = "https://github.com/yujinyue2222-png/watermelon-todo/releases/latest"

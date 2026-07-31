@@ -866,6 +866,7 @@ def load_config():
                "geometry": [140, 120, 340, 500], "collapsed": False,
                "autostart": False, "categories": list(CATEGORIES),
                "floating_ball": True,
+               "bubble_speak": True,
                "hotkey": {"ctrl": True, "alt": True, "shift": False, "key": "T"}}
     if os.path.exists(CONFIG_FILE):
         try:
@@ -2380,22 +2381,43 @@ class TaskCard(QFrame):
 # 桌面悬浮小西瓜
 # ----------------------------------------------------------------------------
 _BALL_SPEECH = [
+    # —— 陪伴 · 打气 ——
     "抱抱西瓜，歇会儿吧～",
     "今天也要元气满满 🍉",
     "待办再多，慢慢来不急",
-    "记得喝水哦 💧",
     "你辛苦啦，奖励自己一口西瓜",
-    "深呼吸，世界不会崩塌",
     "别绷太紧，西瓜都替你放松啦",
+    "一步一步来，你已经很棒啦",
+    "累了就靠一会儿，我陪着你 🍉",
+    "慢一点没关系，方向对就行",
+    "你比自己想象中更能扛哦",
+    "今天的你，已经足够努力啦",
+    "不用赶，稳稳的就很好",
+    "西瓜给你打气：冲鸭，但别硬撑～",
+    "做完一件就少一件，加油 💪",
+    "情绪也要按时清空哦",
+    "你值得被温柔对待，先从自己开始",
+    # —— 身体 · 提醒 ——
+    "记得喝水哦 💧",
+    "久坐啦，起来动动肩膀吧",
+    "眼睛酸了就看看远处 👀",
+    "深呼吸，世界不会崩塌",
+    "别忘了好好吃饭呀 🍚",
+    "该起来伸个懒腰啦～",
+    "护好颈椎，别一直低头哦",
+    "困了就眯一会儿，效率更高",
+    # —— 心情 · 治愈 ——
+    "坏心情？扔给西瓜吧 🍉",
+    "今天也有好好爱自己吗？",
+    "不开心的话，先暂停一下下",
+    "把焦虑放一放，先做眼前这件",
+    "你已经处理了好多事，了不起",
+    "允许自己偶尔摆烂一小会儿",
+    "生活是长跑，不必事事争先",
+    "西瓜相信你，会越来越顺的",
 ]
 
-# 任务提醒文案模板（{task}=任务名），简洁、无引号、无形容词，尽量一行显示
-_BALL_TASK_TEMPLATES = [
-    "记得{task}哦～",
-    "别忘了{task}哦",
-    "该做{task}啦",
-    "{task}还没做呢，记得哦",
-]
+
 
 # 完成待办后的庆祝文案（{n}=今日已完成数）
 _BALL_CELEBRATE = [
@@ -2671,38 +2693,17 @@ class FloatingBall(QWidget):
             self._hide_bubble()
         super().leaveEvent(e)
 
-    def _pick_top_task(self):
-        """按“优先级最高 → 截止时间最早”的规则，挑出当前最该做的一条未完成任务。\n\n        对应“最紧急/重要/时间最近”的诉求：优先级 P0<P1<P2<重要<普通，\n        同优先级下按逻辑截止时间（无时间视为当天 23:59）由近及远。只返回一条。\n        """
-        try:
-            tasks = [t for t in self.main.store.tasks if t.get("status") != "done"]
-        except Exception:
-            return None
-        if not tasks:
-            return None
-
-        def key(t):
-            pr = PRIORITY_RANK.get(t.get("priority", "普通"), 99)
-            return (pr, due_sort_key(t.get("due", "")))
-
-        return sorted(tasks, key=key)[0]
-
-    def _build_task_text(self, task):
-        text = (task.get("text") or "").strip()
-        if not text:
-            text = "那条还没起名的待办"
-        return random.choice(_BALL_TASK_TEMPLATES).format(task=text)
-
     def _show_bubble(self):
+        # 「西瓜说话」总开关关闭时，悬停闲聊气泡静音（任务强提醒不受此限）
+        if not self.main.cfg.get("bubble_speak", True):
+            return
         if getattr(self, "_bubble", None) is None:
             self._bubble = HoverBubble()
         # 悬停气泡由鼠标控制显隐：若此前是“强提醒”自动气泡在显示，停掉自动隐藏计时器
         if getattr(self, "_bubble_hide_timer", None) is not None:
             self._bubble_hide_timer.stop()
-        # 任务提醒与鼓励语均匀交替：偶数次谈“最该做的任务”，奇数次谈心情。
-        # 若没有未完成任务，则始终说鼓励语。
-        self._ball_toggle = (getattr(self, "_ball_toggle", 0) + 1) % 2
-        task = self._pick_top_task() if self._ball_toggle == 0 else None
-        msg = self._build_task_text(task) if task is not None else random.choice(_BALL_SPEECH)
+        # 悬停只说陪伴/鼓励语，不再随机拎出待办念叨（任务提醒交给“强提醒”负责）
+        msg = random.choice(_BALL_SPEECH)
         self._bubble.set_text(msg)
         self._position_bubble()
 
@@ -2781,8 +2782,10 @@ class FloatingBall(QWidget):
     def _celebrate(self, done_today):
         """完成待办后的庆祝：撒花/爱心 + 庆祝脸 + 弹一句庆祝气泡。"""
         n = int(done_today) if done_today else 0
-        msg = self._rnd.choice(_BALL_CELEBRATE).format(n=n)
-        self._show_forced_bubble(msg, 5000)
+        # 「西瓜说话」关闭时，庆祝气泡静音（撒花/表情照常，只是不说话）
+        if self.main.cfg.get("bubble_speak", True):
+            msg = self._rnd.choice(_BALL_CELEBRATE).format(n=n)
+            self._show_forced_bubble(msg, 5000)
         face = self._rnd.choice(["love", "cheer"])
         if face in self._faces:
             self._face = face
@@ -3140,11 +3143,20 @@ class FloatingBall(QWidget):
         """)
         act_open = m.addAction("打开主界面")
         m.addSeparator()
+        _speak_on = self.main.cfg.get("bubble_speak", True)
+        act_speak = m.addAction("关闭西瓜说话" if _speak_on else "开启西瓜说话")
         act_hide = m.addAction("收起悬浮西瓜")
         act_quit = m.addAction("退出程序")
         chosen = m.exec(e.globalPos())
         if chosen == act_open:
             self.main.summon_to_front()
+        elif chosen == act_speak:
+            self.main.cfg["bubble_speak"] = not _speak_on
+            save_config(self.main.cfg)
+            if _speak_on:
+                # 由开→关：立刻把当前悬停闲聊气泡收起（强提醒不受影响）
+                if not self._forced_bubble_active():
+                    self._hide_bubble()
         elif chosen == act_hide:
             self.main._toggle_floating_ball()
         elif chosen == act_quit:
@@ -6622,6 +6634,18 @@ def _start_update_check(parent):
 
 def main():
     app = QApplication(sys.argv)
+    # Windows 命名互斥体：供 Inno Setup 安装器（AppMutex）识别本程序是否在运行，
+    # 从而在覆盖安装时可靠地检测并请求关闭旧版，避免卡在“Closing applications...”。
+    # 名称必须与 .iss 里的 AppMutex 完全一致。
+    if IS_WIN:
+        try:
+            import ctypes
+            _WT_MUTEX_NAME = "WatermelonTodo_AppMutex"
+            # 保存到模块级引用，防止被 GC 释放导致 mutex 提前消失
+            global _wt_app_mutex
+            _wt_app_mutex = ctypes.windll.kernel32.CreateMutexW(None, False, _WT_MUTEX_NAME)
+        except Exception:
+            pass
     logo_path = _resource_path("watermelon_logo.svg")
     if logo_path.exists():
         app.setWindowIcon(QIcon(str(logo_path)))

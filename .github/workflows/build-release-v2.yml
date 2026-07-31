@@ -142,6 +142,8 @@ jobs:
           AppId={{6D51B216-93DF-4E9B-98CA-88A418D115A4}
           AppName=西瓜todo
           AppVersion=${{ steps.ver.outputs.version }}
+          UninstallDisplayName=西瓜todo ${{ steps.ver.outputs.version }}
+          UninstallDisplayIcon={app}\西瓜todo.exe
           DefaultDirName={autopf}\WatermelonTodo
           DefaultGroupName=西瓜todo
           OutputDir=dist
@@ -152,6 +154,12 @@ jobs:
           WizardStyle=modern
           PrivilegesRequired=lowest
           PrivilegesRequiredOverridesAllowed=dialog
+          ; 覆盖安装时自动检测并关闭正在运行的旧版（配合程序里的同名命名互斥体），
+          ; 避免旧进程占用 exe 导致卡在 “Closing applications...” 或安装失败。
+          AppMutex=WatermelonTodo_AppMutex
+          CloseApplications=yes
+          CloseApplicationsFilter=*.exe
+          RestartApplications=no
           [Languages]
           Name: "chs"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
           [Files]

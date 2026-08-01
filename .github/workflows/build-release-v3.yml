@@ -1,0 +1,352 @@
+name: 打包并发布西瓜todo v3
+
+# 触发方式：
+# 1) 推送以 v3- 开头的 tag（如 v3-1.0）→ 跑测试 + 打包 + 自动发布到 Releases
+# 2) 手动运行（Actions 页面点 Run workflow）→ 跑测试 + 打包，产物在本次运行的
+#    Artifacts 里，不创建 Release
+#
+# 日常提交的测试在 test-v3.yml 里，不在这个文件。
+#
+# 这里刻意**不加 paths 过滤**：paths 过滤在 tag push 上的行为容易出意外
+# （tag 指向的往往是已推送过的提交，「改动文件」为空，工作流可能整个不触发），
+# 而漏触发正好会毁掉「推 tag 就出安装包」这件事。
+#
+# 注意：仓库里旧的 build-release-v2.yml 监听的是 `v*`，也会被 `v3-*` 命中。
+# 不想让它一起跑就去 Actions 页面把那个 workflow 关掉。
+on:
+  push:
+    tags:
+      - "v3-*"
+  workflow_dispatch:
+
+env:
+  APP_NAME: 西瓜todo
+  APP_ID: com.watermelon.desktoptodo
+  SRC_DIR: v3
+  ENTRY: run.py
+  SVG_FILE: assets/watermelon_logo.svg
+
+jobs:
+  # ===================== 后端测试：不需要 PySide6，跑得很快 =====================
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+
+      - name: 跑后端与同步测试
+        working-directory: ${{ env.SRC_DIR }}
+        run: python -m unittest discover -s tests -t . -v
+
+  # ============================ Windows：exe + 安装包 ============================
+  build-windows:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install "PySide6>=6.5" "PyInstaller>=6.0" "Pillow>=10.0"
+
+      - name: 读取版本号
+        id: ver
+        working-directory: ${{ env.SRC_DIR }}
+        shell: bash
+        run: |
+          V=$(grep -m1 '^APP_VERSION' backend/core/constants.py | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "版本：$V"
+
+      - name: 由 SVG 生成 ico 图标
+        working-directory: ${{ env.SRC_DIR }}
+        shell: bash
+        env:
+          PYTHONUTF8: "1"
+        run: |
+          python - <<'PY'
+          import os
+          from PySide6.QtCore import QRectF, QSize
+          from PySide6.QtGui import QColor, QImage, QPainter
+          from PySide6.QtSvg import QSvgRenderer
+          from PySide6.QtWidgets import QApplication
+          from PIL import Image
+
+          app = QApplication([])
+          renderer = QSvgRenderer(os.environ["SVG_FILE"])
+          assert renderer.isValid(), "invalid SVG"
+          image = QImage(QSize(1024, 1024), QImage.Format_ARGB32)
+          image.fill(QColor(0, 0, 0, 0))
+          painter = QPainter(image)
+          renderer.render(painter, QRectF(0, 0, 1024, 1024))
+          painter.end()
+          image.save("watermelon-1024.png", "PNG")
+          with Image.open("watermelon-1024.png") as source:
+              source.convert("RGBA").save(
+                  "watermelon.ico", format="ICO",
+                  sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
+              )
+          print("ico done")
+          PY
+
+      - name: PyInstaller 打包单文件 exe
+        working-directory: ${{ env.SRC_DIR }}
+        shell: bash
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed \
+            --name "$APP_NAME" \
+            --icon "watermelon.ico" \
+            --add-data "assets;assets" \
+            --collect-submodules backend \
+            --collect-submodules frontend \
+            --exclude-module PySide6.QtWebEngineCore \
+            --exclude-module PySide6.QtWebEngineWidgets \
+            --exclude-module PySide6.QtQml \
+            --exclude-module PySide6.QtQuick \
+            --exclude-module PySide6.QtMultimedia \
+            --exclude-module PySide6.Qt3DCore \
+            --exclude-module PySide6.QtCharts \
+            --exclude-module PySide6.QtOpenGL \
+            --exclude-module PySide6.QtSql \
+            --exclude-module PySide6.QtTest \
+            --exclude-module PySide6.QtPdf \
+            --exclude-module tkinter \
+            --exclude-module unittest \
+            "$ENTRY"
+          ls -la dist
+
+      - name: 安装 Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: 生成 Setup 安装程序
+        working-directory: ${{ env.SRC_DIR }}
+        shell: bash
+        run: |
+          cat > watermelon_todo.iss <<'ISS'
+          [Setup]
+          AppId={{6D51B216-93DF-4E9B-98CA-88A418D115A4}
+          AppName=西瓜todo
+          AppVersion=${{ steps.ver.outputs.version }}
+          UninstallDisplayName=西瓜todo ${{ steps.ver.outputs.version }}
+          UninstallDisplayIcon={app}\西瓜todo.exe
+          DefaultDirName={autopf}\WatermelonTodo
+          DefaultGroupName=西瓜todo
+          OutputDir=dist
+          OutputBaseFilename=西瓜todo-${{ steps.ver.outputs.version }}-win版-Setup
+          SetupIconFile=watermelon.ico
+          Compression=lzma2
+          SolidCompression=yes
+          WizardStyle=modern
+          PrivilegesRequired=lowest
+          PrivilegesRequiredOverridesAllowed=dialog
+          ; 覆盖安装时自动关掉正在运行的旧版（配合程序里的同名互斥体）
+          AppMutex=WatermelonTodo_AppMutex
+          CloseApplications=yes
+          RestartApplications=no
+          [Languages]
+          Name: "chs"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+          [Files]
+          Source: "dist\西瓜todo.exe"; DestDir: "{app}"; Flags: ignoreversion
+          [Icons]
+          Name: "{autoprograms}\西瓜todo"; Filename: "{app}\西瓜todo.exe"
+          Name: "{autodesktop}\西瓜todo"; Filename: "{app}\西瓜todo.exe"; Tasks: desktopicon
+          [Tasks]
+          Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加选项："
+          [Run]
+          Filename: "{app}\西瓜todo.exe"; Description: "启动 西瓜todo"; Flags: nowait postinstall skipifsilent
+          ISS
+          # 中文语言包可能缺失，缺失就去掉语言段以免编译失败
+          if [ ! -f "/c/Program Files (x86)/Inno Setup 6/Languages/ChineseSimplified.isl" ]; then
+            sed -i '/\[Languages\]/d; /ChineseSimplified.isl/d' watermelon_todo.iss
+          fi
+          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" watermelon_todo.iss
+          cp "dist/西瓜todo.exe" "dist/西瓜todo-${{ steps.ver.outputs.version }}-win版-便携版.exe"
+          ls -la dist
+
+      - name: 上传 Windows 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            ${{ env.SRC_DIR }}/dist/西瓜todo-*-便携版.exe
+            ${{ env.SRC_DIR }}/dist/西瓜todo-*-Setup.exe
+
+  # ============================== macOS：.app + DMG ==============================
+  build-mac:
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install "PySide6>=6.5" "PyInstaller>=6.0"
+
+      - name: 读取版本号
+        id: ver
+        working-directory: ${{ env.SRC_DIR }}
+        run: |
+          V=$(grep -m1 '^APP_VERSION' backend/core/constants.py | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "版本：$V"
+
+      - name: 由 SVG 生成 icns 图标
+        working-directory: ${{ env.SRC_DIR }}
+        run: |
+          python - <<'PY'
+          import os
+          from PySide6.QtCore import QRectF, QSize
+          from PySide6.QtGui import QColor, QImage, QPainter
+          from PySide6.QtSvg import QSvgRenderer
+          from PySide6.QtWidgets import QApplication
+
+          app = QApplication([])
+          renderer = QSvgRenderer(os.environ["SVG_FILE"])
+          assert renderer.isValid(), "无效的 SVG"
+          image = QImage(QSize(1024, 1024), QImage.Format_ARGB32)
+          image.fill(QColor(0, 0, 0, 0))
+          painter = QPainter(image)
+          renderer.render(painter, QRectF(0, 0, 1024, 1024))
+          painter.end()
+          image.save("watermelon-1024.png", "PNG")
+          PY
+          mkdir -p watermelon.iconset
+          sips -z 16 16   watermelon-1024.png --out watermelon.iconset/icon_16x16.png
+          sips -z 32 32   watermelon-1024.png --out watermelon.iconset/icon_16x16@2x.png
+          sips -z 32 32   watermelon-1024.png --out watermelon.iconset/icon_32x32.png
+          sips -z 64 64   watermelon-1024.png --out watermelon.iconset/icon_32x32@2x.png
+          sips -z 128 128 watermelon-1024.png --out watermelon.iconset/icon_128x128.png
+          sips -z 256 256 watermelon-1024.png --out watermelon.iconset/icon_128x128@2x.png
+          sips -z 256 256 watermelon-1024.png --out watermelon.iconset/icon_256x256.png
+          sips -z 512 512 watermelon-1024.png --out watermelon.iconset/icon_256x256@2x.png
+          sips -z 512 512 watermelon-1024.png --out watermelon.iconset/icon_512x512.png
+          cp watermelon-1024.png watermelon.iconset/icon_512x512@2x.png
+          iconutil -c icns watermelon.iconset -o watermelon.icns
+
+      - name: PyInstaller 打包 .app
+        working-directory: ${{ env.SRC_DIR }}
+        run: |
+          pyinstaller --noconfirm --clean --windowed \
+            --name "$APP_NAME" \
+            --icon "watermelon.icns" \
+            --osx-bundle-identifier "$APP_ID" \
+            --add-data "assets:assets" \
+            --collect-submodules backend \
+            --collect-submodules frontend \
+            --exclude-module PySide6.QtWebEngineCore \
+            --exclude-module PySide6.QtWebEngineWidgets \
+            --exclude-module PySide6.QtQml \
+            --exclude-module PySide6.QtQuick \
+            --exclude-module PySide6.QtMultimedia \
+            --exclude-module PySide6.Qt3DCore \
+            --exclude-module PySide6.QtCharts \
+            --exclude-module PySide6.QtOpenGL \
+            --exclude-module PySide6.QtSql \
+            --exclude-module PySide6.QtTest \
+            --exclude-module PySide6.QtPdf \
+            --exclude-module tkinter \
+            --exclude-module unittest \
+            "$ENTRY"
+
+      - name: 临时签名并生成 DMG
+        working-directory: ${{ env.SRC_DIR }}
+        run: |
+          codesign --force --deep --sign - "dist/$APP_NAME.app"
+          mkdir -p dmg_stage
+          cp -R "dist/$APP_NAME.app" dmg_stage/
+          ln -s /Applications dmg_stage/Applications
+          hdiutil create -volname "$APP_NAME" -srcfolder dmg_stage -ov -format UDZO \
+            "dist/$APP_NAME-${{ steps.ver.outputs.version }}-mac版.dmg"
+
+      - name: 上传 Mac 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: ${{ env.SRC_DIR }}/dist/西瓜todo-*-mac版.dmg
+
+  # ============================== 发布到 Releases ==============================
+  release:
+    if: startsWith(github.ref, 'refs/tags/v3-')
+    needs: [build-windows, build-mac]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 从 tag 提取版本号
+        id: ver
+        run: |
+          TAG="${{ github.ref_name }}"
+          echo "version=${TAG#v3-}" >> "$GITHUB_OUTPUT"
+
+      - name: 下载 Windows 产物
+        uses: actions/download-artifact@v4
+        with:
+          name: windows
+          path: dist
+
+      - name: 下载 Mac 产物
+        uses: actions/download-artifact@v4
+        with:
+          name: mac
+          path: dist
+
+      - name: 删除同名旧 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete "${{ github.ref_name }}" --repo "${{ github.repository }}" --yes \
+            || echo "无旧 Release，跳过"
+
+      - name: 创建下载页并挂上安装包
+        uses: softprops/action-gh-release@v2
+        with:
+          name: 西瓜todo ${{ github.ref_name }}
+          body: |
+            ## 西瓜todo ${{ github.ref_name }}
+
+            ### 🪟 Windows
+            - 安装版（推荐）：`西瓜todo-*-win版-Setup.exe`
+            - 便携版（免安装）：`西瓜todo-*-win版-便携版.exe`
+
+            ### 🍎 macOS
+            - `西瓜todo-*-mac版.dmg`，双击后把图标拖进「应用程序」
+
+            ### 📱 手机（iOS / Android）
+            浏览器打开 `http://47.120.58.231:52121/`，用「添加到主屏幕」即可。
+            iOS 需用 Safari，Android 用 Chrome。
+
+            ### ☁ 多端同步
+            在桌面端点标题栏的 ☁ → 同步设置，生成同步码；
+            在其他设备填**同一个同步码**，待办就会自动合并。
+
+            #### 首次打开的安全提示（正常现象）
+            本软件未购买数字签名，首次打开时系统可能拦截：
+            - Windows：点「更多信息」→「仍要运行」
+            - macOS：到「系统设置 → 隐私与安全性」点「仍要打开」
+
+            #### 数据存在哪里
+            - Windows：`%APPDATA%\DesktopTodo\`
+            - macOS：`~/Library/Application Support/DesktopTodo/`
+          files: |
+            dist/西瓜todo-*-Setup.exe
+            dist/西瓜todo-*-便携版.exe
+            dist/西瓜todo-*-mac版.dmg

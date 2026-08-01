@@ -1,0 +1,54 @@
+# 西瓜todo 同步服务的 systemd 单元
+#
+# 安装步骤（服务器上，以 root 执行）：
+#   1. 把 v3/server 与 v3/web 传到 /opt/watermelon/
+#   2. useradd --system --no-create-home --shell /usr/sbin/nologin watermelon
+#   3. cp /opt/watermelon/server/watermelon-sync.service /etc/systemd/system/
+#   4. systemctl daemon-reload && systemctl enable --now watermelon-sync
+#   5. systemctl status watermelon-sync    # 确认已运行
+#   6. journalctl -u watermelon-sync -f    # 看日志
+#
+# 不需要 pip install 任何东西，只要机器上有 python3 (>= 3.7) 且 SQLite >= 3.24。
+
+[Unit]
+Description=Watermelon Todo Sync Service
+After=network-online.target
+Wants=network-online.target
+# 反复崩溃时停下来，而不是无声地一直重启。
+# 这两项自 systemd 229 起属于 [Unit]，写在 [Service] 里会被忽略
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# 不要跑在 root 下：这个进程会按请求路径读取 web 目录里的文件
+User=watermelon
+Group=watermelon
+WorkingDirectory=/opt/watermelon
+ExecStart=/usr/bin/python3 -m server --host 0.0.0.0 --port 52121 \
+          --db /var/lib/watermelon/sync.db \
+          --web /opt/watermelon/web
+Restart=on-failure
+RestartSec=3
+
+# 想再加一道门时取消注释，并在客户端填上同一个令牌
+# Environment=WATERMELON_ACCESS_TOKEN=换成你自己的随机串
+
+# 资源限制：小机器上避免服务失控
+MemoryMax=256M
+CPUQuota=50%
+
+# 基础加固
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+ReadWritePaths=/var/lib/watermelon
+StateDirectory=watermelon
+
+[Install]
+WantedBy=multi-user.target

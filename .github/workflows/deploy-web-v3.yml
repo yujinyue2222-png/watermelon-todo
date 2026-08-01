@@ -1,0 +1,56 @@
+name: 部署 v3 手机端到 Pages（可选）
+
+# ⚠ 这个 workflow 是**可选**的，默认只能手动触发。
+#
+# 原因：GitHub Pages 是 HTTPS 站点，而同步服务目前是裸 HTTP
+# (http://47.120.58.231:52121)。浏览器禁止 HTTPS 页面请求 HTTP 接口
+# （混合内容），所以从 Pages 打开的网页**无法同步**。
+#
+# 推荐做法：直接访问 `http://47.120.58.231:52121/`，页面由同步服务自己发出，
+# 与接口同源，不存在这个问题。
+#
+# 什么时候用这个 workflow？等你给服务器配了 HTTPS（域名 + 证书）之后，
+# 把同步地址改成 https:// 开头，Pages 版就能正常同步了。
+#
+# 另外：仓库里已有一个 deploy-pages.yml 在部署 v2 目录。两者都会写同一个
+# Pages 站点，后跑的会覆盖前一个，别同时启用。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Pages
+        uses: actions/configure-pages@v5
+
+      # 每次部署换一个缓存名，否则 Service Worker 会一直返回旧的 app.js，
+      # 用户永远收不到更新
+      - name: 注入构建号
+        run: |
+          sed -i 's/const BUILD_ID = "dev";/const BUILD_ID = "${{ github.sha }}";/' v3/web/sw.js
+          grep -n 'BUILD_ID' v3/web/sw.js | head -3
+
+      - name: 上传 v3/web
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: v3/web
+
+      - name: 部署
+        id: deployment
+        uses: actions/deploy-pages@v4

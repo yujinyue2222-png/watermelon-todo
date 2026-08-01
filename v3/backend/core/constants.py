@@ -5,7 +5,7 @@
 """
 
 APP_NAME = "西瓜todo"
-APP_VERSION = "3.7"
+APP_VERSION = "3.10"
 APP_ID = "com.watermelon.desktoptodo"
 
 # 用户数据目录名（Windows: %APPDATA%\DesktopTodo，macOS: ~/Library/Application Support/DesktopTodo）

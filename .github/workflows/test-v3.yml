@@ -1,0 +1,32 @@
+name: 测试西瓜todo v3
+
+# 日常提交只跑测试，几秒钟就完事，不打包。
+# 打包发版走 build-release-v3.yml（推 v3-* tag 触发）。
+#
+# 这里只装 Python、不装 PySide6：backend/ server/ tests/ 都只用标准库。
+on:
+  push:
+    branches: [main]
+    paths:
+      - "v3/**"
+      - ".github/workflows/test-v3.yml"
+  pull_request:
+    paths:
+      - "v3/**"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+
+      - name: 跑后端与同步测试
+        working-directory: v3
+        run: python -m unittest discover -s tests -t . -v

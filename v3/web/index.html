@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#ff5a7a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="西瓜todo">
+<meta name="mobile-web-app-capable" content="yes">
+<title>🍉 西瓜todo</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="icon" href="icon.png">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  :root {
+    --bg1: #fff0f3; --bg2: #ffe3ea; --card: #ffffff; --accent: #ff5a7a;
+    --accent2: #ff8fa3; --text: #333; --sub: #999; --done: #bbb; --green: #3ec98a;
+    --shadow: 0 6px 20px rgba(255, 90, 122, .15);
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: linear-gradient(160deg, var(--bg1), var(--bg2));
+    color: var(--text); min-height: 100vh;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  .wrap { max-width: 560px; margin: 0 auto; padding: 16px 14px 150px; }
+
+  header { text-align: center; padding: 10px 0 6px; position: relative; }
+  header h1 { font-size: 26px; color: var(--accent); }
+  .cheer { font-size: 14px; color: var(--sub); margin-top: 6px; min-height: 20px; }
+  .sync-btn {
+    position: absolute; right: 0; top: 6px; border: none; background: var(--card);
+    color: var(--accent); border-radius: 12px; padding: 8px 12px; font-size: 16px;
+    box-shadow: var(--shadow);
+  }
+  .sync-status { font-size: 11px; color: var(--sub); margin-top: 4px; }
+
+  .stat { display: flex; gap: 10px; margin: 14px 0; }
+  .stat .box {
+    flex: 1; background: var(--card); border-radius: 16px; padding: 12px;
+    text-align: center; box-shadow: var(--shadow);
+  }
+  .stat .num { font-size: 22px; font-weight: 700; color: var(--accent); }
+  .stat .lbl { font-size: 12px; color: var(--sub); margin-top: 2px; }
+  .progress { height: 10px; background: #ffe0e6; border-radius: 6px; overflow: hidden; margin: 4px 0 14px; }
+  .progress i {
+    display: block; height: 100%; width: 0;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    transition: width .4s ease;
+  }
+
+  .scopes { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 12px; }
+  .chip {
+    flex: 0 0 auto; border: 1px solid #ffd7de; background: var(--card); color: var(--sub);
+    border-radius: 12px; padding: 7px 12px; font-size: 13px;
+  }
+  .chip.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+
+  ul { list-style: none; }
+  .task {
+    background: var(--card); border-radius: 16px; padding: 14px;
+    margin-bottom: 12px; box-shadow: var(--shadow); animation: pop .25s ease;
+  }
+  @keyframes pop { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  .task.done .title { text-decoration: line-through; color: var(--done); }
+  .trow { display: flex; align-items: flex-start; gap: 10px; }
+  .check {
+    width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--accent2);
+    flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 15px; color: #fff; transition: .2s; margin-top: 1px;
+  }
+  .task.done .check { background: var(--green); border-color: var(--green); }
+  .tbody { flex: 1; min-width: 0; }
+  .title { font-size: 16px; word-break: break-word; line-height: 1.4; }
+  .meta { font-size: 12px; color: var(--sub); margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap; }
+  .badge { border-radius: 8px; padding: 2px 7px; font-size: 11px; }
+  .badge.light { background: #fff2f5; color: #b3737f; }
+  .badge.over { background: #f2564b; color: #fff; font-weight: 600; }
+  .del { color: #ccc; font-size: 20px; padding: 0 4px; flex-shrink: 0; }
+  .empty { text-align: center; color: var(--sub); padding: 50px 0; font-size: 15px; }
+  .empty .big { font-size: 44px; margin-bottom: 10px; }
+
+  .addbar {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+    background: rgba(255, 255, 255, .94); backdrop-filter: blur(10px);
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, .06);
+  }
+  .addbar .inner { max-width: 560px; margin: 0 auto; }
+  .addbar .row { display: flex; gap: 8px; }
+  .addbar .row + .row { margin-top: 8px; }
+  #taskInput {
+    flex: 1; border: none; background: #f4f4f7; border-radius: 14px;
+    padding: 13px 14px; font-size: 16px; outline: none;
+  }
+  #duePick, #editDue { font-size: 15px; }
+  .addbar select {
+    flex: 1; border: none; background: #f4f4f7; border-radius: 12px;
+    padding: 9px 10px; font-size: 13px; color: var(--text);
+  }
+  #duePick { width: 0; opacity: 0; position: absolute; pointer-events: none; }
+  .btn {
+    border: none; border-radius: 14px; color: #fff; font-size: 16px;
+    padding: 0 18px; background: var(--accent); font-weight: 600;
+  }
+  .btn.ghost { background: #f4f4f7; color: var(--accent); font-size: 20px; padding: 0 14px; }
+
+  .sheet {
+    position: fixed; inset: 0; background: rgba(0, 0, 0, .45); z-index: 50;
+    display: none; align-items: flex-end;
+  }
+  .sheet.open { display: flex; }
+  .sheet-inner {
+    background: #fff; width: 100%; border-radius: 20px 20px 0 0; padding: 20px 18px;
+    padding-bottom: calc(20px + env(safe-area-inset-bottom)); max-height: 88vh; overflow: auto;
+  }
+  .sheet h2 { font-size: 18px; margin-bottom: 4px; }
+  .sheet p.hint { font-size: 12px; color: var(--sub); margin-bottom: 14px; line-height: 1.6; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 12px; color: var(--sub); margin-bottom: 6px; }
+  .field input[type=text], .field input[type=datetime-local], .field textarea, .field select {
+    width: 100%; border: 1px solid #eee; background: #fafafa; border-radius: 12px;
+    padding: 11px 12px; font-size: 15px; outline: none; color: var(--text);
+  }
+  .field textarea { min-height: 70px; resize: vertical; }
+  .field.inline { display: flex; gap: 8px; align-items: center; }
+  .field.inline input { flex: 1; }
+  .sheet-actions { display: flex; gap: 8px; margin-top: 16px; }
+  .sheet-actions .btn { flex: 1; padding: 13px 0; border-radius: 12px; font-size: 15px; }
+  .sheet-actions .btn.grey { background: #f1f1f4; color: #666; }
+  .sheet-actions .btn.danger { background: #fdeaea; color: #e5484d; }
+  .small-btn {
+    border: 1px solid #ffd7de; background: #fff; color: var(--accent);
+    border-radius: 10px; padding: 10px 12px; font-size: 13px;
+  }
+  .warn { font-size: 11px; color: var(--accent); line-height: 1.6; }
+
+  .toast {
+    position: fixed; left: 50%; top: 20%; transform: translateX(-50%) scale(.9);
+    background: rgba(0, 0, 0, .82); color: #fff; padding: 12px 20px; border-radius: 14px;
+    font-size: 15px; opacity: 0; pointer-events: none; transition: .25s; z-index: 99;
+    max-width: 80%; text-align: center;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) scale(1); }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>🍉 西瓜todo</h1>
+      <div class="cheer" id="cheer"></div>
+      <div class="sync-status" id="syncStatus">未开启同步</div>
+      <button class="sync-btn" id="syncBtn" title="多端同步">☁</button>
+    </header>
+
+    <div class="stat">
+      <div class="box"><div class="num" id="statTotal">0</div><div class="lbl">全部</div></div>
+      <div class="box"><div class="num" id="statDone">0</div><div class="lbl">已完成</div></div>
+      <div class="box"><div class="num" id="statLeft">0</div><div class="lbl">待办</div></div>
+    </div>
+    <div class="progress"><i id="progress"></i></div>
+
+    <div class="scopes" id="scopes"></div>
+    <ul id="list"></ul>
+    <div class="empty" id="empty">
+      <div class="big">🍉</div>还没有待办，添加一个吧~
+    </div>
+  </div>
+
+  <div class="addbar">
+    <div class="inner">
+      <div class="row">
+        <button class="btn ghost" id="dueBtn" title="设置截止时间">📅</button>
+        <input id="taskInput" placeholder="添加一个待办..." maxlength="200">
+        <input id="duePick" type="datetime-local">
+        <button class="btn" id="addBtn">添加</button>
+      </div>
+      <div class="row">
+        <select id="categoryPick" aria-label="分类"></select>
+        <select id="priorityPick" aria-label="紧急程度"></select>
+      </div>
+    </div>
+  </div>
+
+  <!-- 编辑待办 -->
+  <div class="sheet" id="editSheet">
+    <div class="sheet-inner">
+      <h2>编辑待办</h2>
+      <p class="hint">循环、小步骤、强提醒等桌面端设置会原样保留。</p>
+      <div class="field">
+        <label for="editText">内容</label>
+        <input type="text" id="editText" maxlength="200">
+      </div>
+      <div class="field">
+        <label for="editDue">截止时间</label>
+        <input type="datetime-local" id="editDue">
+      </div>
+      <div class="field">
+        <label for="editCategory">分类</label>
+        <select id="editCategory"></select>
+      </div>
+      <div class="field">
+        <label for="editPriority">紧急程度</label>
+        <select id="editPriority"></select>
+      </div>
+      <div class="field">
+        <label for="editNote">备注</label>
+        <textarea id="editNote" placeholder="记录进行中的注意事项…"></textarea>
+      </div>
+      <div class="field inline">
+        <input type="checkbox" id="editPin" style="width:auto">
+        <label for="editPin" style="margin:0">置顶</label>
+      </div>
+      <div class="sheet-actions">
+        <button class="btn danger" id="editDelete">删除</button>
+        <button class="btn grey" id="editCancel">取消</button>
+        <button class="btn" id="editSave">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 同步设置 -->
+  <div class="sheet" id="syncSheet">
+    <div class="sheet-inner">
+      <h2>多端同步</h2>
+      <p class="hint">在电脑和手机上填写同一个同步码，待办就会自动合并。断网时照常使用，联网后自动补齐。</p>
+      <div class="field">
+        <label for="syncCode">同步码</label>
+        <input type="text" id="syncCode" placeholder="点「生成」得到一个随机同步码" autocapitalize="off" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="field inline">
+        <button class="small-btn" id="syncGenerate">生成</button>
+        <button class="small-btn" id="syncCopy">复制</button>
+        <button class="small-btn" id="syncRun">立即同步</button>
+      </div>
+      <p class="warn">⚠ 同步码就是密码：谁拿到它就能读写你的待办，别公开分享。</p>
+      <div class="field" style="margin-top:12px">
+        <label for="syncServer">服务器地址</label>
+        <input type="text" id="syncServer" placeholder="http://47.120.58.231:52121" autocapitalize="off" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="field">
+        <label for="syncToken">访问令牌（服务端未开启就留空）</label>
+        <input type="text" id="syncToken" placeholder="可选" autocapitalize="off" autocomplete="off" spellcheck="false">
+      </div>
+      <p class="hint" id="syncHint"></p>
+      <div class="sheet-actions">
+        <button class="btn grey" id="syncCancel">取消</button>
+        <button class="btn" id="syncSave">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script src="app.js"></script>
+</body>
+</html>

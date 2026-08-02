@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024"
+     viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="flesh" x1="0.12" y1="0.05" x2="0.86" y2="0.95">
+      <stop offset="0" stop-color="#FF9AA8"/>
+      <stop offset="0.45" stop-color="#FF7185"/>
+      <stop offset="1" stop-color="#EC3F5B"/>
+    </linearGradient>
+    <linearGradient id="rind" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#AEE96A"/>
+      <stop offset="0.5" stop-color="#64C755"/>
+      <stop offset="1" stop-color="#259447"/>
+    </linearGradient>
+    <linearGradient id="mouth" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#A91839"/>
+      <stop offset="1" stop-color="#6F1028"/>
+    </linearGradient>
+    <radialGradient id="cheek">
+      <stop offset="0" stop-color="#FFB0B8" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#FF8292" stop-opacity="0.15"/>
+    </radialGradient>
+    <clipPath id="melonClip">
+      <path d="M512 100
+               C482 100 461 121 443 152
+               L135 679
+               C98 742 139 812 211 827
+               Q512 888 813 827
+               C885 812 926 742 889 679
+               L581 152
+               C563 121 542 100 512 100 Z"/>
+    </clipPath>
+  </defs>
+
+  <!-- Full green watermelon body -->
+  <path d="M512 100
+           C482 100 461 121 443 152
+           L135 679
+           C98 742 139 812 211 827
+           Q512 888 813 827
+           C885 812 926 742 889 679
+           L581 152
+           C563 121 542 100 512 100 Z"
+        fill="url(#rind)" stroke="#249447" stroke-width="8"
+        stroke-linejoin="round"/>
+
+  <!-- Dark rind patches -->
+  <g clip-path="url(#melonClip)" fill="none" stroke="#167A3B"
+     stroke-width="42" stroke-linecap="round" opacity="0.72">
+    <path d="M220 763 Q246 831 286 858"/>
+    <path d="M350 785 Q366 851 400 874"/>
+    <path d="M510 796 V884"/>
+    <path d="M672 785 Q654 851 620 874"/>
+    <path d="M804 763 Q778 831 738 858"/>
+  </g>
+
+  <!-- Pink flesh -->
+  <path d="M512 132
+           C490 132 475 148 459 175
+           L171 668
+           Q512 758 853 668
+           L565 175
+           C549 148 534 132 512 132 Z"
+        fill="url(#flesh)" stroke="#E94762" stroke-width="8"
+        stroke-linejoin="round"/>
+
+  <!-- Cream rind separator -->
+  <path d="M171 668 Q512 758 853 668
+           L826 727 Q512 812 198 727 Z"
+        fill="#F5F3A6"/>
+  <path d="M198 727 Q512 812 826 727" fill="none"
+        stroke="#65BE50" stroke-width="12" opacity="0.55"/>
+
+  <!-- Gloss -->
+  <path d="M480 166 C453 212 405 288 365 358"
+        fill="none" stroke="#FFD6DB" stroke-width="28"
+        stroke-linecap="round" opacity="0.65"/>
+
+  <!-- Seeds -->
+  <g fill="#6F1B30">
+    <path d="M324 420 C286 388 290 350 318 344 C345 351 354 385 324 420 Z"/>
+    <path d="M508 321 C481 282 494 247 522 248 C547 264 542 299 508 321 Z"/>
+    <path d="M703 419 C674 383 682 350 711 345 C738 359 735 391 703 419 Z"/>
+    <path d="M270 548 C239 516 246 486 272 480 C299 492 299 521 270 548 Z"/>
+    <path d="M755 548 C727 520 728 491 754 481 C783 490 785 520 755 548 Z"/>
+  </g>
+
+  <!-- Open eye -->
+  <ellipse cx="384" cy="494" rx="73" ry="82" fill="#FFFFFF"
+           stroke="#F6E7E4" stroke-width="10"/>
+  <ellipse cx="397" cy="506" rx="43" ry="52" fill="#261D20"/>
+  <ellipse cx="380" cy="486" rx="16" ry="20" fill="#FFFFFF"/>
+  <circle cx="413" cy="528" r="8" fill="#FFFFFF" opacity="0.72"/>
+
+  <!-- Winking eye -->
+  <path d="M579 506 Q632 461 685 506"
+        fill="none" stroke="#211A1C" stroke-width="19"
+        stroke-linecap="round"/>
+
+  <!-- Cheeks -->
+  <ellipse cx="289" cy="593" rx="61" ry="35" fill="url(#cheek)"/>
+  <ellipse cx="731" cy="593" rx="61" ry="35" fill="url(#cheek)"/>
+
+  <!-- Happy mouth -->
+  <path d="M420 577
+           C441 559 583 559 604 577
+           C601 660 557 700 512 700
+           C467 700 423 660 420 577 Z"
+        fill="url(#mouth)" stroke="#7B1831" stroke-width="8"
+        stroke-linejoin="round"/>
+  <path d="M447 579 H504 V607
+           C488 620 459 615 447 597 Z" fill="#FFFFFF"/>
+  <ellipse cx="520" cy="669" rx="54" ry="25" fill="#FF884D"/>
+</svg>

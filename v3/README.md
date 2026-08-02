@@ -129,16 +129,16 @@ frontend  ──►  backend.api.TodoBackend  ──►  services  ──►  re
 > 服务启动时会自检并直接报错退出，不会让你摸不着头脑。
 
 ```bash
-# 1. 把 v3 的 server 和 web 传上去
-scp -r v3/server v3/web root@47.120.58.231:/opt/watermelon/
+# 1. 把 v3 的 server 和 web 传上去（这一步在你自己电脑上执行）
+scp -r v3/server v3/web root@47.120.58.231:/opt/jy_online/
 
 # 2. 建一个专用账号（服务不以 root 运行）
 ssh root@47.120.58.231
 useradd --system --no-create-home --shell /usr/sbin/nologin watermelon
-chown -R watermelon:watermelon /opt/watermelon
+chown -R watermelon:watermelon /opt/jy_online
 
 # 3. 装成系统服务
-cp /opt/watermelon/server/watermelon-sync.service /etc/systemd/system/
+cp /opt/jy_online/server/watermelon-sync.service /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now watermelon-sync
 systemctl status watermelon-sync        # 确认 active (running)
@@ -151,11 +151,20 @@ firewall-cmd --add-port=52121/tcp --permanent && firewall-cmd --reload
 curl http://47.120.58.231:52121/api/health
 ```
 
+> **代码目录不能放在 `/root` 或 `/home` 下。** 单元文件里的 `ProtectHome=yes`
+> 会让这些目录对本服务完全不可见（哪怕以 root 运行也读不到自己的代码），
+> 而且 `/root` 是 `0700`，低权限的 `watermelon` 账号根本进不去。
+> 想换别的位置就挑 `/opt`、`/srv` 这类系统级目录，并同步改 `WorkingDirectory`
+> 与 `ExecStart` 里的 `--web` 路径。
+
 跑起来后：
 
 - 手机上浏览器打开 `http://47.120.58.231:52121/`，「添加到主屏幕」即可当 App 用
 - 看日志：`journalctl -u watermelon-sync -f`
-- 数据库：`/var/lib/watermelon/sync.db`，**备份就是拷这一个文件**
+- 数据库：`/var/lib/jy_online/sync.db`，**备份就是拷这一个文件**。
+  这个目录由单元文件里的 `StateDirectory=jy_online` 自动创建并授权，不用手动
+  `mkdir` / `chown`。**数据目录和代码目录是分开的**，重传代码、甚至删掉整个
+  `/opt/jy_online` 都不会影响已有待办
 
 资源占用：常驻内存约 15-20MB（systemd 单元里限了 256MB / 50% CPU 做保险）。
 不需要 nginx、不需要 pip install、不需要 Docker。
@@ -259,7 +268,8 @@ git tag v3-1.0 && git push origin v3-1.0     # 这一步才会打包并创建下
 文件格式与 v2 兼容，v2 的数据可以直接被 v3 读取（旧字段自动补齐，
 例如老版本的「紧急」优先级会并入 P1）。
 
-**服务端**：`/var/lib/watermelon/sync.db`（SQLite 单文件）。
+**服务端**：`/var/lib/jy_online/sync.db`（SQLite 单文件）。代码在 `/opt/jy_online`，
+两者刻意分开，换代码不影响数据。
 
 ## 功能一览
 

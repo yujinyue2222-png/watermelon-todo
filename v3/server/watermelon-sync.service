@@ -1,14 +1,18 @@
 # 西瓜todo 同步服务的 systemd 单元
 #
 # 安装步骤（服务器上，以 root 执行）：
-#   1. 把 v3/server 与 v3/web 传到 /opt/watermelon/
+#   1. 把 v3/server 与 v3/web 传到 /opt/jy_online/
 #   2. useradd --system --no-create-home --shell /usr/sbin/nologin watermelon
-#   3. cp /opt/watermelon/server/watermelon-sync.service /etc/systemd/system/
-#   4. systemctl daemon-reload && systemctl enable --now watermelon-sync
-#   5. systemctl status watermelon-sync    # 确认已运行
-#   6. journalctl -u watermelon-sync -f    # 看日志
+#   3. chown -R watermelon:watermelon /opt/jy_online
+#   4. cp /opt/jy_online/server/watermelon-sync.service /etc/systemd/system/
+#   5. systemctl daemon-reload && systemctl enable --now watermelon-sync
+#   6. systemctl status watermelon-sync    # 确认已运行
+#   7. journalctl -u watermelon-sync -f    # 看日志
 #
 # 不需要 pip install 任何东西，只要机器上有 python3 (>= 3.7) 且 SQLite >= 3.24。
+#
+# 代码目录不要放在 /root 或 /home 下：下面的 ProtectHome=yes 会让这些目录对本服务
+# 完全不可见，而且 /root 是 0700，低权限的 watermelon 账号根本进不去。
 
 [Unit]
 Description=Watermelon Todo Sync Service
@@ -24,10 +28,10 @@ Type=simple
 # 不要跑在 root 下：这个进程会按请求路径读取 web 目录里的文件
 User=watermelon
 Group=watermelon
-WorkingDirectory=/opt/watermelon
+WorkingDirectory=/opt/jy_online
 ExecStart=/usr/bin/python3 -m server --host 0.0.0.0 --port 52121 \
-          --db /var/lib/watermelon/sync.db \
-          --web /opt/watermelon/web
+          --db /var/lib/jy_online/sync.db \
+          --web /opt/jy_online/web
 Restart=on-failure
 RestartSec=3
 
@@ -47,8 +51,10 @@ ProtectHome=yes
 ProtectKernelTunables=yes
 ProtectControlGroups=yes
 RestrictSUIDSGID=yes
-ReadWritePaths=/var/lib/watermelon
-StateDirectory=watermelon
+# systemd 会自动创建 /var/lib/jy_online、把归属设成服务账号，并在
+# ProtectSystem=strict 之下单独放开它的写权限，所以不用再写 ReadWritePaths，
+# 也不用手动 mkdir / chown
+StateDirectory=jy_online
 
 [Install]
 WantedBy=multi-user.target

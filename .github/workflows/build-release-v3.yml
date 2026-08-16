@@ -1,7 +1,7 @@
 name: 打包并发布西瓜todo v3
 
 # 触发方式：
-# 1) 推送以 v3- 开头的 tag（如 v3-1.0）→ 跑测试 + 打包 + 自动发布到 Releases
+# 1) 推送以 v3 开头的 tag（如 v3.7、v3-1.0）→ 跑测试 + 打包 + 自动发布到 Releases
 # 2) 手动运行（Actions 页面点 Run workflow）→ 跑测试 + 打包，产物在本次运行的
 #    Artifacts 里，不创建 Release
 #
@@ -11,12 +11,12 @@ name: 打包并发布西瓜todo v3
 # （tag 指向的往往是已推送过的提交，「改动文件」为空，工作流可能整个不触发），
 # 而漏触发正好会毁掉「推 tag 就出安装包」这件事。
 #
-# 注意：仓库里旧的 build-release-v2.yml 监听的是 `v*`，也会被 `v3-*` 命中。
+# 注意：仓库里旧的 build-release-v2.yml 监听的是 `v*`，也会被 `v3*` 命中。
 # 不想让它一起跑就去 Actions 页面把那个 workflow 关掉。
 on:
   push:
     tags:
-      - "v3-*"
+      - "v3*"
   workflow_dispatch:
 
 env:
@@ -285,7 +285,7 @@ jobs:
 
   # ============================== 发布到 Releases ==============================
   release:
-    if: startsWith(github.ref, 'refs/tags/v3-')
+    if: startsWith(github.ref, 'refs/tags/v3')
     needs: [build-windows, build-mac]
     runs-on: ubuntu-latest
     permissions:
@@ -295,7 +295,7 @@ jobs:
         id: ver
         run: |
           TAG="${{ github.ref_name }}"
-          echo "version=${TAG#v3-}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
       - name: 下载 Windows 产物
         uses: actions/download-artifact@v4

@@ -4,6 +4,35 @@
 
 ---
 
+## v3.7
+
+本版本主要打磨**强提醒弹窗**与**标题栏细节**，并修掉「未勾选悬浮提醒仍弹窗」的体验问题。
+代码已推到 main，并打 tag `v3.7` 走云端打包（Windows 安装版/便携版 + macOS DMG 自动发布到 Releases）。
+
+### 新增 / 调整
+
+- **强提醒弹窗重写**：
+  - 数字输入框去掉上下箭头，改为直接输入数字，更清爽。
+  - 表单布局整理（5 列网格、数字框 54px / 单位 82px、间距收紧），不再隔太远、不再掩盖「小时」。
+- **标题栏打磨**：最小化横杠按钮改为与其他 5 个标题栏按钮一致——白色背景 + 圆角，
+  用 `QStyleOptionButton` 显式绘制样式背景（修复 macOS 下自定义 `paintEvent` 覆盖背景的问题）。
+
+### 修复
+
+- **未勾选「开启西瓜悬浮提醒」仍弹窗**：
+  - `reminder_service` 收集强提醒事件时，若 `not strong.enabled or not strong.float_window` 直接跳过；
+  - `main_window._notify` 在强提醒且 `not event.float_window` 时不再建 `ReminderPopup`；
+  - `floating_ball` 悬停气泡候选过滤加上 `t.strong.float_window` 判断。
+    三者一致后，未开启悬浮提醒就不会有弹窗 / 气泡。
+
+### 兼容性
+
+- 覆盖安装自动关掉旧版：Inno Setup 安装包沿用 `AppMutex=WatermelonTodo_AppMutex`，
+  与程序内 `WINDOWS_APP_MUTEX` 同名，覆盖安装时自动关闭正在运行的旧进程；
+  待办数据仍保存在系统用户目录（Windows `%APPDATA%\DesktopTodo\`、macOS `~/Library/Application Support/DesktopTodo\`），不随程序移动丢失。
+
+---
+
 ## v3.0
 
 本版本聚焦**主题系统**与**桌面小西瓜**两大块，并修掉了几个体验上的顽固问题。

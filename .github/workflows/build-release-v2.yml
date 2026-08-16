@@ -20,6 +20,7 @@ env:
 jobs:
   # ========================= Windows：exe + Setup 安装程序 =========================
   build-windows:
+    if: startsWith(github.ref, 'refs/tags/v') && !startsWith(github.ref, 'refs/tags/v3')
     runs-on: windows-latest
     steps:
       - name: 拉取代码
@@ -200,6 +201,7 @@ jobs:
 
   # ========================= macOS：.app + DMG =========================
   build-mac:
+    if: startsWith(github.ref, 'refs/tags/v') && !startsWith(github.ref, 'refs/tags/v3')
     runs-on: macos-latest
     steps:
       - name: 拉取代码
@@ -326,7 +328,7 @@ jobs:
 
   # ========================= 发布到 Releases 下载页 =========================
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') && !startsWith(github.ref, 'refs/tags/v3')
     needs: [build-windows, build-mac]
     runs-on: ubuntu-latest
     permissions:

@@ -457,6 +457,7 @@ class ReminderServiceTest(unittest.TestCase):
                 interval_value=30,
                 interval_unit="分钟",
                 max_count=2,
+                float_window=True,
             ),
         )
 
@@ -515,6 +516,7 @@ class ReminderServiceTest(unittest.TestCase):
                 interval_value=30,
                 interval_unit="分钟",
                 max_count=1,
+                float_window=True,
             ),
         )
         fired = self.backend.reminders.collect(now=datetime.datetime(2026, 8, 5, 16, 30))

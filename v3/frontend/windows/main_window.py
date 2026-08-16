@@ -38,6 +38,8 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
     QGraphicsOpacityEffect,
+    QStyle,
+    QStyleOptionButton,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -115,27 +117,30 @@ class _TitleIconButton(QPushButton):
     def __init__(self, kind: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._kind = kind
-        self.setFlat(True)
 
     def paintEvent(self, event):  # noqa: N802
-        from PySide6.QtCore import Qt as _Qt
-        from PySide6.QtGui import QColor as _QColor
-
+        """先用 QSS/Style 绘制按钮背景（含 hover），再叠画图标。"""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+
+        # 让 Qt 样式引擎画出 titlebtn 背景和高亮，保证和其他按钮一致
+        opt = QStyleOptionButton()
+        self.initStyleOption(opt)
+        self.style().drawControl(QStyle.CE_PushButton, opt, painter, self)
+
         w, h = self.width(), self.height()
         color = QColor("#9aa0a6")
         if self.underMouse():
             color = QColor("#ffffff")
-        painter.setPen(_QColor(color))
-        painter.setBrush(_QColor(color))
+        painter.setPen(color)
+        painter.setBrush(color)
         if self._kind == "minimize":
-            bar_w, bar_h = max(12, int(w * 0.5)), 2
+            bar_w, bar_h = max(10, int(w * 0.35)), 2
             x = (w - bar_w) // 2
             y = (h - bar_h) // 2
             painter.drawRect(x, y, bar_w, bar_h)
         else:
-            painter.drawText(self.rect(), _Qt.AlignCenter, "-")
+            painter.drawText(self.rect(), Qt.AlignCenter, "-")
         painter.end()
 
 
@@ -359,6 +364,7 @@ class MainWindow(QWidget):
         self._menu_button.setToolTip("更多设置")
         self._collapse_button = _TitleIconButton("minimize")
         self._collapse_button.setToolTip("隐藏窗口（缩小到后台）")
+        self._collapse_button.setObjectName("titlebtn")
         self._collapse_button.clicked.connect(self._toggle_collapse)
         close_button = QPushButton("✕")
         close_button.setObjectName("closebtn")
@@ -366,22 +372,22 @@ class MainWindow(QWidget):
 
         title_font = QFont("PingFang SC", 14)
         title_font.setWeight(QFont.Weight.Medium)
-        for button in (
+
+        # 统一设置标题栏按钮样式/尺寸；最小化按钮放在关闭按钮左边
+        title_buttons = [
             self._sync_button,
             self._theme_button,
             self._menu_button,
+            self._collapse_button,
             close_button,
-        ):
+        ]
+        for button in title_buttons:
             if button.objectName() != "closebtn":
                 button.setObjectName("titlebtn")
             button.setFixedSize(30, 30)
             button.setCursor(Qt.PointingHandCursor)
             button.setFont(title_font)
             bar.addWidget(button)
-        self._collapse_button.setFixedSize(30, 30)
-        self._collapse_button.setCursor(Qt.PointingHandCursor)
-        self._collapse_button.setObjectName("titlebtn")
-        bar.addWidget(self._collapse_button)
 
         self._sync_button.clicked.connect(self._show_sync_menu)
         self._theme_button.clicked.connect(self._show_theme_menu)
@@ -1518,9 +1524,14 @@ class MainWindow(QWidget):
         """弹出一条提醒。
 
         强提醒不阻塞操作（自动关闭），普通提醒模态等待用户确认。
+        强提醒若未勾选「悬浮小西瓜浮窗提醒/桌面全局弹出卡片」，则只走悬浮球
+        气泡，不弹桌面提醒卡片。
         """
         if event.float_window and self._floating_ball is not None:
             self._floating_ball.force_bubble(f"记得{event.task.text}哦～")
+
+        if event.is_strong and not event.float_window:
+            return
 
         popup = ReminderPopup(
             theme=self.theme,

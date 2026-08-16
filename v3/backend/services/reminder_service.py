@@ -171,9 +171,13 @@ class ReminderService:
         task: Task,
         now: datetime.datetime,
     ) -> tuple[Optional[ReminderEvent], bool]:
-        """强提醒：时间窗内按间隔反复提醒。"""
+        """强提醒：时间窗内按间隔反复提醒。
+
+        未勾选「悬浮小西瓜浮窗/桌面全局弹出卡片」时，强提醒没有可见输出，
+        直接跳过，避免空跑并导致计数/last_at 提前消耗。
+        """
         strong = task.strong
-        if not strong.enabled:
+        if not strong.enabled or not strong.float_window:
             return None, False
         due_at = task.due_at
         if due_at is None:

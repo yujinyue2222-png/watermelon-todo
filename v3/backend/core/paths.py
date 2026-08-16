@@ -11,6 +11,7 @@ import logging
 import os
 import shutil
 import sys
+import uuid
 from pathlib import Path
 
 from backend.core.constants import (
@@ -75,6 +76,86 @@ def data_file() -> Path:
 def config_file() -> Path:
     """配置文件路径。"""
     return user_data_dir() / CONFIG_FILE_NAME
+
+
+def images_dir() -> Path:
+    """待办图片目录（用户数据目录下 images/），必要时创建。
+
+    图片文件集中存放，待办只记文件名；同步时传文件名，对端没有
+    对应文件时按「无图」处理，不影响主流程。
+    """
+    target = user_data_dir() / "images"
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        logger.warning("待办图片目录 %s 不可用：%s", target, exc)
+        return user_data_dir()
+    return target
+
+
+def image_path(name: str) -> Path:
+    """待办图片的完整路径；名称为空返回空路径。"""
+    return images_dir() / name if name else Path()
+
+
+def store_image(src_path: str) -> str:
+    """把图片文件复制进待办图片目录，返回新文件名。
+
+    Args:
+        src_path: 源图片的完整路径。
+
+    Returns:
+        复制成功返回文件名（不含目录）；失败返回空串。
+    """
+    source = Path(src_path)
+    if not source.is_file():
+        return ""
+    suffix = (source.suffix or "").lower()
+    if suffix not in {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}:
+        suffix = ".png"
+    name = f"{uuid.uuid4().hex}{suffix}"
+    try:
+        shutil.copy2(source, images_dir() / name)
+    except OSError as exc:
+        logger.warning("复制待办图片 %s 失败：%s", source, exc)
+        return ""
+    return name
+
+
+def store_image_bytes(data: bytes, suffix: str = ".png") -> str:
+    """把内存中的图片数据写入待办图片目录，返回新文件名。
+
+    用于从剪贴板粘贴等拿不到源文件的场景。
+
+    Args:
+        data: 图片的二进制内容。
+        suffix: 目标扩展名（含点），默认 ``.png``。
+
+    Returns:
+        写入成功返回文件名（不含目录）；失败返回空串。
+    """
+    if not data:
+        return ""
+    suffix = (suffix or ".png").lower()
+    if suffix not in {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}:
+        suffix = ".png"
+    name = f"{uuid.uuid4().hex}{suffix}"
+    try:
+        (images_dir() / name).write_bytes(data)
+    except OSError as exc:
+        logger.warning("写入待办图片 %s 失败：%s", name, exc)
+        return ""
+    return name
+
+
+def delete_image(name: str) -> None:
+    """删除待办图片文件；文件不存在时静默忽略。"""
+    if not name:
+        return
+    try:
+        (images_dir() / name).unlink(missing_ok=True)
+    except OSError as exc:
+        logger.warning("删除待办图片 %s 失败：%s", name, exc)
 
 
 def migrate_legacy_files(legacy_dirs: tuple[Path, ...] = ()) -> None:

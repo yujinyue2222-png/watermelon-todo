@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QContextMenuEvent, QIcon, QMouseEvent, QResizeEvent
+from PySide6.QtGui import QContextMenuEvent, QIcon, QMouseEvent, QPixmap, QResizeEvent
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -25,8 +25,10 @@ from PySide6.QtWidgets import (
 
 from backend.core.constants import NOTE_PREVIEW_LIMIT
 from backend.core.datetime_utils import due_label, format_due
+from backend.core.paths import image_path
 from backend.models.enums import Priority, Recurrence, Remind
 from backend.models.task import Task
+from frontend.dialogs.media_preview_dialog import TaskDetailDialog, open_image_viewer
 from frontend.theme.palettes import (
     CATEGORY_COLORS,
     PIN_ICON,
@@ -44,6 +46,7 @@ from frontend.widgets.icons import pencil_icon
 _CHECKED_BOX = "☑"
 _UNCHECKED_BOX = "☐"
 _EDIT_ICON_SIZE = 18
+_THUMB_SIZE = 64
 
 # 铅笔图标全列表共用一份：每次悬停都重绘一遍位图太浪费
 _pencil_cache: Optional[QIcon] = None
@@ -144,6 +147,10 @@ class TaskCard(QFrame):
         if note_preview is not None:
             middle.addWidget(note_preview)
 
+        image_row = self._build_image_row()
+        if image_row is not None:
+            middle.addWidget(image_row)
+
         meta = FlowLayout(horizontal_spacing=6, vertical_spacing=4)
         for widget in self._build_meta_widgets():
             meta.addWidget(widget)
@@ -185,6 +192,59 @@ class TaskCard(QFrame):
         label.setToolTip(note)
         label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         return label
+
+    def _build_image_row(self) -> Optional[QWidget]:
+        """图片缩略图行；没有图片或文件缺失时返回 None。"""
+        valid = [
+            name
+            for name in self.task.images
+            if image_path(name).is_file() and not QPixmap(str(image_path(name))).isNull()
+        ]
+        if not valid:
+            return None
+
+        box = QWidget()
+        row = QHBoxLayout(box)
+        row.setContentsMargins(0, 4, 0, 0)
+        row.setSpacing(8)
+
+        # 卡片上最多平铺 4 张，超出的折叠成「+N」
+        # 缩略图按原图比例显示，不设固定方形框，避免圆角/横竖照片被塞进
+        # 方形框后露黑底；保持照片原本形状。
+        MAX_THUMBS = 4
+        for idx, name in enumerate(valid[:MAX_THUMBS]):
+            thumb = QLabel()
+            thumb.setObjectName("thumb")
+            thumb.setAlignment(Qt.AlignCenter)
+            thumb.setStyleSheet("background: transparent; border: none;")
+            thumb.setCursor(Qt.PointingHandCursor)
+            pix = QPixmap(str(image_path(name)))
+            if not pix.isNull():
+                # 等比缩放进最大边长的框内，框尺寸随图自适应
+                scale = min(
+                    1.0, _THUMB_SIZE / pix.width(), _THUMB_SIZE / pix.height()
+                )
+                w = max(1, int(pix.width() * scale))
+                h = max(1, int(pix.height() * scale))
+                thumb.setFixedSize(w, h)
+                thumb.setPixmap(
+                    pix.scaled(w, h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                )
+            thumb.mousePressEvent = (
+                lambda event, i=idx: open_image_viewer(
+                    self, self._theme, valid, i
+                )
+            )
+            row.addWidget(thumb, 0, Qt.AlignTop)
+        extra = len(valid) - MAX_THUMBS
+        if extra > 0:
+            more = QLabel(f"+{extra}")
+            more.setObjectName("thumbmore")
+            more.setFixedSize(_THUMB_SIZE, _THUMB_SIZE)
+            more.setAlignment(Qt.AlignCenter)
+            row.addWidget(more, 0, Qt.AlignTop)
+        row.addStretch(1)
+        return box
 
     def _build_meta_widgets(self) -> list[QWidget]:
         """标签行：优先级、分类、截止、循环、提醒、强提醒、小步骤进度。"""
@@ -231,6 +291,18 @@ class TaskCard(QFrame):
             badge.setCursor(Qt.PointingHandCursor)
             badge.clicked.connect(self.toggle_subtask_panel)
             widgets.append(badge)
+
+        # 内容太长或带图片时给一个「查看全部」小键，点击弹长条型完整待办窗口
+        note = " ".join(self.task.note.split())
+        if len(note) > NOTE_PREVIEW_LIMIT or self.task.images:
+            full = QPushButton("📄 查看全部")
+            full.setObjectName("thumbbtn")
+            full.setCursor(Qt.PointingHandCursor)
+            full.setFixedHeight(24)
+            full.clicked.connect(
+                lambda: TaskDetailDialog.show_detail(self, self._theme, self.task)
+            )
+            widgets.append(full)
 
         return widgets
 

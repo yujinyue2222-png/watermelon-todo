@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import math
 import random
+import sys
 from typing import Any, Optional, Protocol
 
 from PySide6.QtCore import QPointF, QRect, QRectF, Qt, QTimer
@@ -37,6 +38,7 @@ from PySide6.QtWidgets import (
 )
 
 from backend.api import TodoBackend
+from backend.core.platform_info import IS_MACOS
 from frontend.native.window_effects import (
     apply_no_steal_focus,
     bring_to_front_quietly,
@@ -46,7 +48,11 @@ from frontend.native.window_effects import (
 from frontend.theme.qss import menu_qss
 from frontend.theme.theme_manager import ThemeManager
 from frontend.windows import ball_faces
-from frontend.windows.ball_speech import CELEBRATE_LINES, HOVER_LINES
+from frontend.windows.ball_speech import (
+    CELEBRATE_LINES,
+    HOVER_LINES,
+    strong_remind_line,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +60,7 @@ logger = logging.getLogger(__name__)
 _FRAME_INTERVAL_MS = 30  # 约 33fps
 _FRAME_SECONDS = 0.03
 _HOVER_POLL_MS = 120
+_HOVER_HIDE_DELAY_MS = 3000  # 鼠标离开后气泡再留 3 秒，避免一闪即逝
 _WALK_FREQUENCY = 5.0
 _TOPMOST_EVERY_FRAMES = 60
 _STATS_EVERY_FRAMES = 60
@@ -105,12 +112,16 @@ class HoverBubble(QWidget):
 
     def __init__(self) -> None:
         super().__init__(None)
-        self.setWindowFlags(
-            Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
-        )
+        # macOS 上用普通 Window 而非 Tool，否则非激活 app 时气泡窗口不会显示
+        flags = Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+        if not IS_MACOS:
+            flags |= Qt.Tool
+        self.setWindowFlags(flags)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        if IS_MACOS:
+            self.setAttribute(Qt.WA_MacAlwaysShowToolWindow, True)
 
         self._label = QLabel("", self)
         self._label.setWordWrap(True)
@@ -301,25 +312,61 @@ class FloatingBall(QWidget):
         if self._drag_offset is not None:
             return  # 拖动中不打扰
 
-        inside = self._body_rect().contains(self.mapFromGlobal(QCursor.pos()))
+        # 直接用全局屏幕坐标判断光标是否落在「西瓜本体」区域内，
+        # 避免无焦点 Tool 窗口上 mapFromGlobal 坐标漂移导致永远判定为 False。
+        geo = self.geometry()
+        cursor = QCursor.pos()
+        body_left = geo.x() + self.PAD_X - 1
+        body_top = geo.y() + self.PAD_TOP - 1
+        inside = (
+            geo.x() <= cursor.x() <= geo.x() + geo.width()
+            and geo.y() <= cursor.y() <= geo.y() + geo.height()
+        )
         if inside == self._hover_inside:
             return  # 状态没变就不换台词，杜绝文字飞快切换
         self._hover_inside = inside
         if inside:
             self._show_hover_bubble()
-        elif not self._bubble_is_timed():
-            # 强提醒/庆祝气泡有自己的计时器，别被鼠标移开顺手关掉
-            self._hide_bubble()
+        else:
+            # 鼠标离开后给一点宽限时间，让气泡淡出前能被看到；
+            # 但强提醒/庆祝等定时气泡不受影响（由自己的计时器控制）。
+            if not self._bubble_is_timed():
+                self._schedule_hide_bubble()
 
     def _show_hover_bubble(self) -> None:
-        """悬停只说陪伴/鼓励语，任务提醒交给强提醒负责。"""
+        """悬停时优先催促开启了强提醒的未完成待办；否则说陪伴/鼓励语。"""
         if not self._backend.config.bubble_speak:
             return
         self._ensure_bubble()
         if self._bubble_timer is not None:
             self._bubble_timer.stop()
-        self._bubble.set_text(self._random.choice(HOVER_LINES))
+        text = self._strong_remind_text()
+        if text is None:
+            text = self._random.choice(HOVER_LINES)
+        self._bubble.set_text(text)
         self._position_bubble()
+
+    def _strong_remind_text(self) -> Optional[str]:
+        """若有强提醒且未完成的待办，返回随机一条催促文案；否则 None。"""
+        try:
+            tasks = self._backend.tasks.tasks  # TaskService 用 .tasks 属性暴露全量待办
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("读取待办列表失败：%s", exc)
+            return None
+        candidates = [
+            t
+            for t in tasks
+            if getattr(t, "strong", None) is not None
+            and t.strong.enabled
+            and t.strong.float_window
+            and not t.is_done
+        ]
+        if not candidates:
+            return None
+        # 优先到期/紧急的，再随机挑一条
+        candidates.sort(key=lambda t: (t.due_at is None, t.due_at))
+        task = self._random.choice(candidates)
+        return strong_remind_line(task.text or "这条待办")
 
     def _show_bubble_for(self, text: str, duration_ms: int) -> None:
         """显示一条会自动消失的气泡（不抢焦点）。"""
@@ -345,6 +392,15 @@ class FloatingBall(QWidget):
         """收起气泡。"""
         if self._bubble is not None:
             self._bubble.hide()
+
+    def _schedule_hide_bubble(self) -> None:
+        """鼠标离开后延迟收起悬停气泡，避免一闪即逝；定时气泡不受影响。"""
+        if self._bubble_timer is None:
+            self._bubble_timer = QTimer(self)
+            self._bubble_timer.setSingleShot(True)
+            self._bubble_timer.timeout.connect(self._hide_bubble)
+        # 悬停气泡的宽限时长（毫秒）
+        self._bubble_timer.start(_HOVER_HIDE_DELAY_MS)
 
     def _position_bubble(self) -> None:
         """气泡永远从西瓜右上方冒出。
@@ -373,17 +429,18 @@ class FloatingBall(QWidget):
 
         width = self._bubble.width()
         height = self._bubble.height()
+        # 显示在西瓜「右上方」（球右侧 + 上方）
         x = body_right + _BUBBLE_GAP
         y = self.y() + self.PAD_TOP - height - _BUBBLE_GAP
         if area is not None:
-            if x + width > area.right() - 4:
-                x = area.right() - 4 - width
             x = max(area.left() + 4, min(x, area.right() - width - 4))
             y = max(area.top() + 4, min(y, area.bottom() - height - 4))
 
         self._bubble.move(x, y)
         self._bubble.show()
         bring_to_front_quietly(self._bubble)
+        # 再强制一次置顶，确保跨应用窗口也压在最前
+        self._bubble.raise_()
 
     # ------------------------------------------------------------------ 动画
     def _current_speed(self) -> float:

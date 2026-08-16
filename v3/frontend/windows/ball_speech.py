@@ -87,8 +87,17 @@ CHEER_LINES = (
     "{name}，完成度 > 完美度，先动起来⚡",
     "{name}，今天的你也在悄悄变强🌱",
     "{name}，累了就抱抱西瓜再出发🍉",
-    "{name}，把注意力放在下一小步就好🎯",
-    "{name}，你的坚持终会开花🌸",
+)
+
+# 鼠标悬停小西瓜时，若有待办开启了强提醒且未完成，优先催促
+# {task} 是待办文字；多条强提醒时随机挑一条任务来念
+STRONG_REMIND_LINES = (
+    "{task}还没做哦，抓紧时间记得哦～",
+    "{task}还没完成呢，赶紧去处理一下吧💪",
+    "{task}在等你啦，别拖太久哦⏰",
+    "{task}记得做哦，不然小西瓜要催你啦🔔",
+    "叮咚～{task}还没搞定，快去完成它🌟",
+    "{task}别落下呀，现在就去做最省心✅",
 )
 
 
@@ -109,3 +118,9 @@ def random_cheer(name: str) -> str:
         name: 用户昵称。
     """
     return random.choice(CHEER_LINES).format(name=name)
+
+
+def strong_remind_line(task_text: str) -> str:
+    """随机取一句强提醒催促语，``{task}`` 是待办文字。"""
+    quoted = f"「{task_text}」" if task_text else task_text
+    return random.choice(STRONG_REMIND_LINES).format(task=quoted)

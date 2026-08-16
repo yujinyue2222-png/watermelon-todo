@@ -38,6 +38,7 @@ _UPDATABLE_FIELDS = frozenset(
         "remind",
         "remind_log",
         "note",
+        "images",
         "project",
         "subtasks",
         "strong",
@@ -59,6 +60,7 @@ class TaskDraft:
     recur_end: str = ""
     remind: str = Remind.DEFAULT
     note: str = ""
+    images: list[str] = field(default_factory=list)
     project: str = ""
 
 
@@ -205,6 +207,7 @@ class TaskService:
             recur_end=draft.recur_end,
             remind=draft.remind,
             note=draft.note,
+            images=list(draft.images),
             project=draft.project,
         )
         task.touch()
@@ -249,6 +252,7 @@ class TaskService:
                 recur_end=draft.recur_end,
                 remind=draft.remind,
                 note=draft.note,
+                images=list(draft.images),
                 project=draft.project,
             )
             task.touch()
@@ -586,6 +590,7 @@ class TaskService:
             recur_anchor=anchor_day,
             remind=task.remind,
             note=task.note,
+            images=list(task.images),
             project=task.project,
         )
         spawned.touch()

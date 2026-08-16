@@ -183,6 +183,7 @@ class Task:
     remind: str = Remind.DEFAULT
     remind_log: list[str] = field(default_factory=list)
     note: str = ""
+    images: list[str] = field(default_factory=list)  # 待办图片文件名列表（存于用户数据目录 images/ 下）
     project: str = ""
     subtasks: list[SubTask] = field(default_factory=list)
     strong: StrongRemind = field(default_factory=StrongRemind)
@@ -202,6 +203,14 @@ class Task:
         """
         self.updated_at = max(now_ms(), self.updated_at + 1)
         self.dirty = True
+
+    @property
+    def image(self) -> str:
+        """第一张图片的文件名；没有图片返回空串。
+
+        兼容旧版单图时期的代码（卡片缩略图、删除清理等）。
+        """
+        return self.images[0] if self.images else ""
 
     @property
     def is_done(self) -> bool:
@@ -256,6 +265,15 @@ class Task:
         log_raw = raw.get("remind_log")
         remind_log = [str(item) for item in log_raw] if isinstance(log_raw, list) else []
 
+        # 图片兼容迁移：新版存 images 数组；老数据只有 image 字符串，
+        # 迁移成单元素列表；两者都没有则保持空列表
+        images_raw = raw.get("images")
+        if isinstance(images_raw, list):
+            images = [str(name) for name in images_raw if name]
+        else:
+            legacy = str(raw.get("image") or "")
+            images = [legacy] if legacy else []
+
         created = str(raw.get("created") or _now_iso())
         updated_at = _as_int(raw.get("updated_at"), 0) or _iso_to_ms(created)
 
@@ -272,6 +290,7 @@ class Task:
             remind=remind,
             remind_log=remind_log,
             note=str(raw.get("note") or ""),
+            images=images,
             project=str(raw.get("project") or ""),
             subtasks=subtasks,
             strong=StrongRemind.from_dict(raw.get("strong")),
@@ -299,6 +318,8 @@ class Task:
             "remind": self.remind,
             "remind_log": list(self.remind_log),
             "note": self.note,
+            "images": list(self.images),
+            "image": self.image,  # 兼容旧版单图字段与旧同步服务端
             "project": self.project,
             "created": self.created,
             "notified": self.notified,

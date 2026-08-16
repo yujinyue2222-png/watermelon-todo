@@ -315,7 +315,8 @@ def task_card_qss(
             border-radius: 8px; padding: 3px 8px;
         }}
         QPushButton#edit {{
-            background: {theme['panel']}; border: 1px solid {theme['border']};
+            background: {theme['panel'] if is_hovered else 'transparent'};
+            border: {('1px solid ' + theme['border']) if is_hovered else 'none'};
             border-radius: 8px; color: {theme['sub']}; font-size: 13px;
         }}
         QPushButton#edit:hover {{
@@ -338,6 +339,25 @@ def task_card_qss(
         QPushButton#subitem:hover {{
             color: {theme['accent']}; background: {alpha(theme['accent'], 0x10)};
         }}
+        QLabel#thumb {{
+            border: 1px solid {theme['border']}; border-radius: 8px;
+            background: {theme['panel']};
+        }}
+        QLabel#thumbmore {{
+            color: {theme['sub']}; font-size: 13px; font-weight: 600;
+            border: 1px dashed {theme['border']}; border-radius: 8px;
+            background: {theme['panel']};
+        }}
+        QPushButton#thumbbtn {{
+            color: {theme['sub']}; font-size: 12px;
+            background: {alpha(theme['accent'], 0x0d)};
+            border: 1px solid {theme['border']};
+            border-radius: 8px; padding: 2px 8px;
+        }}
+        QPushButton#thumbbtn:hover {{
+            color: {theme['accent']}; background: {alpha(theme['accent'], 0x16)};
+            border-color: {alpha(theme['accent'], 0x60)};
+        }}
     """
 
 
@@ -350,9 +370,12 @@ def inline_editor_qss(theme: Theme) -> str:
             border: 1px solid {alpha(theme['accent'], 0x80)};
             border-radius: 13px;
         }}
-        QLineEdit#inlineedit {{
+        QTextEdit#inlineedit, QLineEdit#inlineedit {{
             border: none; background: transparent; font-size: 14px;
             color: {theme['text']};
+        }}
+        QTextEdit#inlineedit::placeholder {{
+            color: {alpha(theme['sub'], 0x80)};
         }}
         QPushButton#inlinedate, QPushButton#inlineok, QPushButton#inlinecancel {{
             border: 1px solid {theme['border']}; border-radius: 8px;
@@ -385,6 +408,17 @@ def inline_editor_qss(theme: Theme) -> str:
         }}
         QComboBox#inlinepr::down-arrow, QComboBox#inlinect::down-arrow {{
             image: none; width: 0; height: 0; border: none; background: transparent;
+        }}
+        QLabel#inlineimg {{
+            background: transparent; border: none;
+        }}
+        QPushButton#inlineimgclose {{
+            border: none; border-radius: 9px;
+            background: rgba(0,0,0,0.55); color: #FFFFFF;
+            font-size: 11px; font-weight: bold; padding: 0;
+        }}
+        QPushButton#inlineimgclose:hover {{
+            background: {DANGER_COLOR};
         }}
         QComboBox#inlinepr QAbstractItemView, QComboBox#inlinect QAbstractItemView {{
             border: 1px solid {theme['border']}; border-radius: 8px;
@@ -500,10 +534,46 @@ def surface_dialog_qss(theme: Theme) -> str:
         QLabel#dialogSubtitle {{
             color: {theme['sub']}; font-size: 11px; font-weight: 400;
         }}
+        QLabel#dialogWatermelon {{
+            font-size: 22px; background: transparent; padding: 0px;
+        }}
+        QLabel#expiredBanner {{
+            color: {theme['sub']}; font-size: 12px; font-weight: 500;
+            background: {theme['card']}; border: 1px solid {theme['border']};
+            border-radius: 10px; padding: 8px 12px;
+        }}
+        QLabel#fieldHint {{
+            color: {theme['sub']}; font-size: 11px; font-weight: 400;
+        }}
+        QFrame#switchFrame {{
+            background: {theme['card']}; border: 1px solid {theme['border']};
+            border-radius: 12px; padding: 6px;
+        }}
+        QPushButton#switchOn, QPushButton#switchOff {{
+            background: transparent; color: {theme['sub']};
+            border: 1px solid {theme['border']};
+            border-radius: 9px; padding: 9px 0px; font-size: 13px; font-weight: 600;
+        }}
+        QPushButton#switchOn:hover, QPushButton#switchOff:hover {{
+            border-color: {theme['accent']}; color: {theme['text']};
+        }}
+        QPushButton#switchOn:checked {{
+            background: {theme['accent']}; color: #FFFFFF; border-color: {theme['accent']};
+        }}
+        QPushButton#switchOff:checked {{
+            background: {DANGER_STRONG_COLOR}; color: #FFFFFF; border-color: {DANGER_STRONG_COLOR};
+        }}
         QLineEdit, QSpinBox, QComboBox {{
             background: {theme['card']}; color: {theme['text']};
             border: 1px solid {theme['border']}; border-radius: 10px;
             padding: 4px 10px; font-size: 13px;
+        }}
+        QSpinBox {{
+            padding-right: 4px;
+        }}
+        QSpinBox::up-button, QSpinBox::down-button {{
+            width: 0px; height: 0px; border: none; background: transparent;
+            subcontrol-origin: border;
         }}
         QLineEdit:hover, QSpinBox:hover, QComboBox:hover {{
             border-color: {alpha(theme['accent'], 0x80)};

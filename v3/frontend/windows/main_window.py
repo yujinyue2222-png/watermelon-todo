@@ -28,6 +28,7 @@ from PySide6.QtGui import (
     QBrush,
     QColor,
     QCursor,
+    QFont,
     QPainter,
     QPainterPath,
     QPixmap,
@@ -108,6 +109,36 @@ _IMAGE_FILTER = "图片文件 (*.png *.jpg *.jpeg *.bmp *.gif *.webp)"
 _EXPORT_FILTER = "CSV 文件 (*.csv);;文本文件 (*.txt)"
 
 
+class _TitleIconButton(QPushButton):
+    """标题栏图标按钮：用 QPainter 直接绘制，不依赖字体字形，避免乱码。"""
+
+    def __init__(self, kind: str, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._kind = kind
+        self.setFlat(True)
+
+    def paintEvent(self, event):  # noqa: N802
+        from PySide6.QtCore import Qt as _Qt
+        from PySide6.QtGui import QColor as _QColor
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        w, h = self.width(), self.height()
+        color = QColor("#9aa0a6")
+        if self.underMouse():
+            color = QColor("#ffffff")
+        painter.setPen(_QColor(color))
+        painter.setBrush(_QColor(color))
+        if self._kind == "minimize":
+            bar_w, bar_h = max(12, int(w * 0.5)), 2
+            x = (w - bar_w) // 2
+            y = (h - bar_h) // 2
+            painter.drawRect(x, y, bar_w, bar_h)
+        else:
+            painter.drawText(self.rect(), _Qt.AlignCenter, "-")
+        painter.end()
+
+
 class MainWindow(QWidget):
     """待办主面板。"""
 
@@ -129,7 +160,7 @@ class MainWindow(QWidget):
         self._active_project = ""
         self._select_mode = False
         self._selected_ids: set[str] = set()
-        self._collapsed = config.collapsed
+        self._collapsed = False
         self._expanded_height = config.expanded_height
         self._nickname = nickname()
         self._add_form_memory = FormMemory()
@@ -195,10 +226,7 @@ class MainWindow(QWidget):
         self.summon_to_front()
 
     def summon_to_front(self) -> None:
-        """把窗口召回前台。折叠状态下会自动展开。"""
-        if self._collapsed:
-            self._collapsed = False
-            self._apply_collapsed()
+        """把窗口召回前台。"""
         self.showNormal()
         self.raise_()
         self.activateWindow()
@@ -329,24 +357,31 @@ class MainWindow(QWidget):
         self._theme_button.setToolTip("主题与背景")
         self._menu_button = QPushButton("⋮")
         self._menu_button.setToolTip("更多设置")
-        self._collapse_button = QPushButton("–")
-        self._collapse_button.setToolTip("折叠 / 展开")
+        self._collapse_button = _TitleIconButton("minimize")
+        self._collapse_button.setToolTip("隐藏窗口（缩小到后台）")
+        self._collapse_button.clicked.connect(self._toggle_collapse)
         close_button = QPushButton("✕")
         close_button.setObjectName("closebtn")
         close_button.setToolTip("隐藏到后台（彻底退出请点 ⋮ 菜单）")
 
+        title_font = QFont("PingFang SC", 14)
+        title_font.setWeight(QFont.Weight.Medium)
         for button in (
             self._sync_button,
             self._theme_button,
             self._menu_button,
-            self._collapse_button,
             close_button,
         ):
             if button.objectName() != "closebtn":
                 button.setObjectName("titlebtn")
             button.setFixedSize(30, 30)
             button.setCursor(Qt.PointingHandCursor)
+            button.setFont(title_font)
             bar.addWidget(button)
+        self._collapse_button.setFixedSize(30, 30)
+        self._collapse_button.setCursor(Qt.PointingHandCursor)
+        self._collapse_button.setObjectName("titlebtn")
+        bar.addWidget(self._collapse_button)
 
         self._sync_button.clicked.connect(self._show_sync_menu)
         self._theme_button.clicked.connect(self._show_theme_menu)
@@ -1583,29 +1618,17 @@ class MainWindow(QWidget):
         self.setGeometry(x, y, width, height)
 
     def _apply_collapsed(self) -> None:
-        """应用折叠/展开状态。"""
-        expanded = not self._collapsed
-        self._set_body_visible(expanded)
+        """应用折叠/展开状态（已废弃，保持展开）。"""
+        self._set_body_visible(True)
         layout = self.layout()
-        if self._collapsed:
-            # 折叠时收紧上下边距，标题栏才能在小高度里垂直居中
-            layout.setContentsMargins(14, 10, 14, 10)
-            self.setMinimumHeight(0)
-            self.setFixedHeight(_COLLAPSED_HEIGHT)
-        else:
-            layout.setContentsMargins(14, 12, 14, 14)
-            self.setMaximumHeight(_MAX_HEIGHT)
-            self.setMinimumHeight(_MIN_EXPANDED_HEIGHT)
-            self.resize(self.width(), self._expanded_height)
-        self._collapse_button.setText("▢" if self._collapsed else "–")
+        layout.setContentsMargins(14, 12, 14, 14)
+        self.setMaximumHeight(_MAX_HEIGHT)
+        self.setMinimumHeight(_MIN_EXPANDED_HEIGHT)
+        self.resize(self.width(), self._expanded_height)
 
     def _toggle_collapse(self) -> None:
-        """折叠成一条标题栏，或还原。"""
-        if not self._collapsed:
-            self._expanded_height = self.height()
-        self._collapsed = not self._collapsed
-        self._apply_collapsed()
-        self._save_config()
+        """折叠功能已废弃，改为隐藏窗口。"""
+        self.hide()
 
     def _set_body_visible(self, visible: bool) -> None:
         """折叠时只留标题栏与折叠/关闭按钮。"""
@@ -1733,8 +1756,7 @@ class MainWindow(QWidget):
     def _save_config(self) -> None:
         """把窗口状态写回配置。"""
         geometry = self.geometry()
-        if not self._collapsed:
-            self._expanded_height = geometry.height()
+        self._expanded_height = geometry.height()
 
         config = self._backend.config
         config.geometry.x = geometry.x()
@@ -1742,6 +1764,6 @@ class MainWindow(QWidget):
         config.geometry.width = geometry.width()
         config.geometry.height = self._expanded_height
         config.expanded_height = self._expanded_height
-        config.collapsed = self._collapsed
+        config.collapsed = False
         config.theme = self._themes.current_name
         self._backend.save_config()

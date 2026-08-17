@@ -23,7 +23,9 @@ from server.http_api import create_server
 logger = logging.getLogger("watermelon.server")
 
 DEFAULT_HOST = "0.0.0.0"
-DEFAULT_PORT = 52121
+# 京东云 DevCloud 的 K8s ingress 只路由容器的 8080 端口，其他端口一律不可达。
+# 本地/自建服务器仍可用 --port 或环境变量 WATERMELON_PORT 覆盖。
+DEFAULT_PORT = int(os.environ.get("PORT", 8080))
 DEFAULT_DB_PATH = Path("~/.watermelon-sync/sync.db")
 
 # 墓碑保留天数：超过这个时间的「已删除」记录会被物理清理

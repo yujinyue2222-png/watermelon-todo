@@ -18,6 +18,7 @@ from typing import Optional
 from PySide6.QtCore import (
     QEasingCurve,
     QEvent,
+    QPoint,
     QPropertyAnimation,
     QRect,
     Qt,
@@ -63,6 +64,7 @@ from backend.services.reminder_service import ReminderEvent
 from backend.services.task_service import TaskDraft, TaskQuery
 from backend.sync.engine import SyncResult
 from backend.system.autostart import is_autostart_supported
+from frontend.dialogs.all_tasks_dialog import AllTasksDialog
 from frontend.dialogs.batch_add_dialog import BatchAddDialog, DuplicateChoice, FormMemory
 from frontend.dialogs.due_picker_dialog import DuePickerDialog, Schedule
 from frontend.dialogs.export_dialog import ExportOptionsDialog
@@ -102,6 +104,9 @@ _MAX_HEIGHT = 16_777_215
 _CARD_FADE_DELAY_MS = 40
 _REORDER_DELAY_MS = 280
 _STRONG_POPUP_MS = 8000
+# 每分钟检查一次系统日期是否翻篇：过了午夜或休眠唤醒后要重建列表，
+# 否则「明天」等相对日期标签会停在昨天算出的值上（21 号设的待办到 22 号还显示「明天」）。
+_DATE_WATCH_INTERVAL_MS = 60_000
 _BACKGROUND_MASK_ALPHA = 150
 # 启动后多久做第一次同步：等界面显示完，避免和启动抢资源
 _FIRST_SYNC_DELAY_MS = 1500
@@ -201,6 +206,14 @@ class MainWindow(QWidget):
         self._reminder_timer.timeout.connect(self._check_reminders)
         self._reminder_timer.start(REMINDER_INTERVAL_MS)
 
+        # 监视日期翻篇：卡片上的「今天/明天/N 天后」是在构建卡片那一刻算好的，
+        # 程序常驻不动时不会自己更新。这里每分钟看一眼日期，一旦跨天就重建列表，
+        # 让相对日期标签跟上真实的今天。
+        self._last_seen_date = datetime.date.today()
+        self._date_watch_timer = QTimer(self)
+        self._date_watch_timer.timeout.connect(self._check_date_rollover)
+        self._date_watch_timer.start(_DATE_WATCH_INTERVAL_MS)
+
         self._sync = SyncController(backend, self)
         self._sync.state_changed.connect(self._on_sync_state_changed)
         self._sync.finished.connect(self._on_sync_finished)
@@ -212,6 +225,33 @@ class MainWindow(QWidget):
 
         if config.floating_ball:
             self.show_floating_ball()
+
+        # 运行中拔副屏、改分辨率或 DPI 变化后，上次坐标可能落到屏幕之外，
+        # 窗口和悬浮球就会「莫名不见了」但进程还在。监听屏幕变化，自动拉回可见区。
+        self._connect_screen_guard()
+
+    def _connect_screen_guard(self) -> None:
+        """监听屏幕增删/几何变化，变化后把窗口与悬浮球拉回可见区域。"""
+        app = QApplication.instance()
+        if app is None:
+            return
+        app.screenAdded.connect(self._on_screens_changed)
+        app.screenRemoved.connect(self._on_screens_changed)
+        app.primaryScreenChanged.connect(self._on_screens_changed)
+        for screen in app.screens():
+            screen.geometryChanged.connect(self._on_screens_changed)
+            screen.availableGeometryChanged.connect(self._on_screens_changed)
+
+    def _on_screens_changed(self, *args) -> None:
+        """屏幕布局变化：延迟一拍等系统稳定，再把窗口/悬浮球夹回可见区。"""
+        QTimer.singleShot(300, self._ensure_on_screen)
+
+    def _ensure_on_screen(self) -> None:
+        """把主窗口和悬浮球都夹回当前可见区域，避免留在屏幕外看不见。"""
+        if self.isVisible():
+            self._restore_geometry()
+        if self._floating_ball is not None:
+            self._floating_ball.clamp_into_screen()
 
     # ================================================================ 生命周期
     @property
@@ -1420,6 +1460,10 @@ class MainWindow(QWidget):
         ball.triggered.connect(self._toggle_floating_ball)
         menu.addSeparator()
 
+        all_tasks = menu.addAction("📋 查看全部待办")
+        all_tasks.triggered.connect(self._show_all_tasks)
+        menu.addSeparator()
+
         open_folder = menu.addAction("📂 打开数据文件夹")
         open_folder.triggered.connect(self._open_data_folder)
         menu.addSeparator()
@@ -1433,6 +1477,10 @@ class MainWindow(QWidget):
         quit_action = menu.addAction("彻底退出程序")
         quit_action.triggered.connect(self.quit_application)
         menu.exec(QCursor.pos())
+
+    def _show_all_tasks(self) -> None:
+        """打开全部待办总览（只读）。"""
+        AllTasksDialog.show_tasks(self, self.theme, self._backend.tasks.tasks)
 
     def _clear_completed(self) -> None:
         """清除已完成待办。"""
@@ -1515,6 +1563,17 @@ class MainWindow(QWidget):
         self._floating_ball = None
 
     # ==================================================================== 提醒
+    def _check_date_rollover(self) -> None:
+        """日期翻篇时重建列表，让「今天/明天/N 天后」等相对标签跟上真实日期。
+
+        用「记录上次看到的日期，和现在比对」的方式，既能覆盖过了午夜的正常翻篇，
+        也能覆盖电脑休眠好几天后唤醒、日期一次跳过多天的情况。
+        """
+        today = datetime.date.today()
+        if today != self._last_seen_date:
+            self._last_seen_date = today
+            self.refresh(animate=False)
+
     def _check_reminders(self) -> None:
         """定时检查提醒并弹窗。"""
         for event in self._backend.reminders.collect():
@@ -1617,7 +1676,9 @@ class MainWindow(QWidget):
         width = max(geometry.width, _MIN_WIDTH)
         height = max(self._expanded_height, _MIN_EXPANDED_HEIGHT)
 
-        screen = QApplication.primaryScreen()
+        # 先按窗口中心找它当前所在屏；找不到（落在所有屏幕之外）再退回主屏。
+        center = QPoint(int(x + width / 2), int(y + height / 2))
+        screen = QApplication.screenAt(center) or QApplication.primaryScreen()
         if screen is not None:
             available = screen.availableGeometry()
             width = min(width, available.width())

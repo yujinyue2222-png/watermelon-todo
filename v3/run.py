@@ -18,6 +18,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from backend.core.crash_guard import install_crash_guard  # noqa: E402
 from backend.core.logging_setup import setup_logging  # noqa: E402
 from backend.core.paths import user_data_dir  # noqa: E402
 
@@ -48,10 +49,14 @@ def run(args: argparse.Namespace) -> int:
     Returns:
         进程退出码。
     """
+    data_dir = user_data_dir()
     setup_logging(
-        log_dir=user_data_dir(),
+        log_dir=data_dir,
         level=logging.DEBUG if args.debug else logging.INFO,
     )
+    # 日志就绪后立刻装崩溃留痕：事件循环里未捕获的异常/原生崩溃都会进日志，
+    # 避免程序「莫名就不在了」却查不到原因
+    install_crash_guard(data_dir)
     # 延迟到日志初始化之后再导入前端，保证 Qt 的告警也能进日志
     from frontend.application import run_app
 

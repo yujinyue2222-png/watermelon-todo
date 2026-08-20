@@ -276,7 +276,25 @@ class FloatingBall(QWidget):
             y = area.bottom() - self.height_px - 120
         self.move(x, y)
 
-    def _body_rect(self) -> QRect:
+    def clamp_into_screen(self) -> None:
+        """把悬浮球夹回当前可见区域。
+
+        运行中拔副屏、改分辨率或 DPI 变化后，球可能停在已消失的屏幕上，
+        看起来就是「悬浮球不见了」。这里按本体中心找当前屏，越界就拉回来。
+        """
+        screen = (
+            QApplication.screenAt(self.geometry().center())
+            or self.screen()
+            or QApplication.primaryScreen()
+        )
+        if screen is None:
+            return
+        area = screen.availableGeometry()
+        x = min(max(self.x(), area.left()), area.right() - self.width_px)
+        y = min(max(self.y(), area.top()), area.bottom() - self.height_px)
+        if (x, y) != (self.x(), self.y()):
+            self.move(x, y)
+            self._backend.config.floating_ball_pos = [x, y]
         """西瓜本体的悬停判定区。
 
         控件比本体大一圈（要给弹跳、摆动、腿留空间），气泡又故意压在右上角，
